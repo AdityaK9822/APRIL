@@ -6,7 +6,7 @@
   │  input()          typed line — only when GUI=0 (app mode reads no stdin)│
   │  voice.py         wake word ──► record-to-silence ──► mlx-whisper       │
   │  gui.py           window Send ──► queued, reply rendered on the timer   │
-  └────────────────────────────────┬───────────────────────────────────────┘
+  └────────────────────────────────┬────────────────────────────────────────┘
                                    │  (mic closed before the turn)
                     ┌──────────────┴───────────────┐
             image_for(request)?              otherwise
