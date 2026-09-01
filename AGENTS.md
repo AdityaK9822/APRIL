@@ -1,4 +1,4 @@
-# Open_INT — Agent Instructions
+# APRIL — Agent Instructions
 
 Read `docs/CONTEXT.md` and `docs/ARCHITECTURE.md` first (roadmap in
 `docs/ROADMAP.md`). This file stays at the project root by convention; the

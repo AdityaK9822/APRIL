@@ -1,4 +1,4 @@
-# Open_INT — Architecture
+# APRIL — Architecture
 
 ## Flow
 ```
@@ -17,7 +17,7 @@
         │ literal path → VLM    │      │ no history → ONE cmd   │
         └───────────┬───────────┘      └───────────┬────────────┘
                     │                              │
-                    │                    confirm() if OPEN_INT_CONFIRM=1
+                    │                    confirm() if APRIL_CONFIRM=1
                     │                    (app turn? the window answers it)
                     │                              │
                     │              subprocess.run(shell=True, timeout=60)
@@ -37,7 +37,7 @@
 | `ask_about_image(...)` | Sends `image_url` as a base64 `data:` URI. Prose answer, never a command |
 | `next_request()` | The dispatcher — round-robin poll across enabled sources |
 | `run_command(cmd)` | `subprocess.run(shell=True, timeout=60)`; combined output |
-| `confirm(command, app_turn)` | `OPEN_INT_CONFIRM=1` gate; window > voice > typed |
+| `confirm(command, app_turn)` | `APRIL_CONFIRM=1` gate; window > voice > typed |
 | `_state()` / `_apply_setting()` | What the rail shows, and the runtime flags it may flip (VOICE imports lazily) |
 | `_set_mic(want)` | Opens/closes the mic to match `VOICE`; on failure says why and turns voice off |
 | `loop()` | The turn loop. A worker thread in GUI mode, the main thread when `GUI=0` |

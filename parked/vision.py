@@ -1,4 +1,4 @@
-"""Camera perception for Open_INT — hand gestures + object detection.
+"""Camera perception for APRIL — hand gestures + object detection.
 
 Opt-in: main.py only imports this when VISION=1. Heavy deps import lazily so
 `python vision.py` (the self-check) needs nothing but numpy.
@@ -267,7 +267,7 @@ def snapshot(path=None):
     """
     import cv2
 
-    path = path or os.path.join(tempfile.gettempdir(), "open_int_cam.png")
+    path = path or os.path.join(tempfile.gettempdir(), "april_cam.png")
     cam = _cam if _cam is not None else cv2.VideoCapture(CAMERA_INDEX)
     try:
         ok, frame = cam.read()

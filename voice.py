@@ -1,4 +1,4 @@
-"""Voice I/O for Open_INT — wake word + local STT (mlx-whisper) + local TTS (Piper).
+"""Voice I/O for APRIL — wake word + local STT (mlx-whisper) + local TTS (Piper).
 
 Opt-in: main.py only imports this when VOICE=1. All heavy deps are imported here.
 """
@@ -127,7 +127,7 @@ def speak(text):
     text = text.strip()
     if not text:
         return
-    wav = os.path.join(tempfile.gettempdir(), "open_int_tts.wav")
+    wav = os.path.join(tempfile.gettempdir(), "april_tts.wav")
     try:
         subprocess.run(
             ["piper", "-m", PIPER_VOICE, "--data-dir", VOICES_DIR, "-f", wav],

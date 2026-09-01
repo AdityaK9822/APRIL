@@ -32,7 +32,7 @@ from Quartz import CGColorCreateSRGB
 
 TICK = 0.15               # seconds between UI pulls; nothing here is expensive
 GATE_TIMEOUT = 120        # seconds a pending command waits for an answer
-FLAGS = ("VOICE", "VISION", "OPEN_INT_CONFIRM")
+FLAGS = ("VOICE", "VISION", "APRIL_CONFIRM")
 WINDOW = (1180, 820)
 
 _requests = queue.Queue()  # (text, reply_queue) — drained by next_request()
@@ -288,7 +288,7 @@ class _App(NSObject):
                  | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, *WINDOW), style, NSBackingStoreBuffered, False)
-        self.window.setTitle_("Open_INT")
+        self.window.setTitle_("APRIL")
         self.window.setMinSize_(NSMakeSize(880, 600))
         self.window.setDelegate_(self)
         # the design system is light-only; don't half-inherit a dark appearance
@@ -315,7 +315,7 @@ class _App(NSObject):
         self.logo = NSImageView.alloc().init()
         self.logo.setImage_(_symbol("chevron.left.forwardslash.chevron.right"))
         self.logo.setContentTintColor_(PRIMARY)
-        self.brand = _label("Open_INT", 15, TEXT, SEMIBOLD)
+        self.brand = _label("APRIL", 15, TEXT, SEMIBOLD)
         self.model_badge = _badge("…", TEXT)
         self.model_badge.inner.setFont_(_font(12, MEDIUM, mono=True))
         self.backend = _label("", 12, TEXT_MUTED)
@@ -330,7 +330,7 @@ class _App(NSObject):
         self.confirm_btn.setButtonType_(2)  # NSButtonTypeSwitch behaviour, push look
         self.confirm_btn.setBordered_(True)
         self.settings_btn = _icon_button("gearshape", self, "openSettings:", "Settings")
-        self.quit_btn = _icon_button("power", self, "quitApp:", "Quit Open_INT")
+        self.quit_btn = _icon_button("power", self, "quitApp:", "Quit APRIL")
         for v in (self.confirm_btn, self.settings_btn, self.quit_btn):
             self.header.addSubview_(v)
 
@@ -696,7 +696,7 @@ class _App(NSObject):
         self._flip("VOICE", not bool(_info().get("voice")))
 
     def toggleConfirm_(self, sender):
-        self._flip("OPEN_INT_CONFIRM", sender.state() == NSControlStateValueOn)
+        self._flip("APRIL_CONFIRM", sender.state() == NSControlStateValueOn)
 
     def toggleSource_(self, sender):
         self._flip(sender.identifier().upper(), sender.state() == NSControlStateValueOn)
@@ -764,8 +764,8 @@ class _App(NSObject):
         y += 12
         for key, text in (("VOICE", "VOICE — wake word, speech in, speech out"),
                           ("VISION", "VISION — camera gestures and objects"),
-                          ("OPEN_INT_CONFIRM",
-                           "OPEN_INT_CONFIRM — approve each command before it runs")):
+                          ("APRIL_CONFIRM",
+                           "APRIL_CONFIRM — approve each command before it runs")):
             box = NSButton.checkboxWithTitle_target_action_(text, None, None)
             box.setState_(NSControlStateValueOn if s.get(
                 {"VOICE": "voice", "VISION": "vision"}.get(key, "confirm")) else 0)

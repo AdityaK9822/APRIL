@@ -1,4 +1,4 @@
-# Open_INT — Context
+# APRIL — Context
 
 ## What this is
 A minimal local assistant: you give a request (typed or spoken), a
@@ -81,7 +81,7 @@ the YOLO weights only matter if you reconnect `parked/vision.py`.)
 
 ## Constraints / decisions
 - No sandbox on command execution — full shell access is the point. The only
-  guard is opt-in `OPEN_INT_CONFIRM=1`, off by default.
+  guard is opt-in `APRIL_CONFIRM=1`, off by default.
 - Stdlib-only for system access (`os`, `platform`, `subprocess`).
 - `main.py`, `voice.py`, `gui.py` are the sanctioned files. `gui.py`
   earned the fourth slot as a whole I/O surface, the same shape as the other two:

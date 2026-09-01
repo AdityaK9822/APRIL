@@ -22,7 +22,7 @@ MODEL = os.getenv("OPENAI_MODEL", "gemma3:4b")  # does both commands and images
 
 VOICE = os.getenv("VOICE") == "1"
 GUI = os.getenv("GUI", "1") == "1"  # the app is the interface; GUI=0 = old terminal loop
-CONFIRM = os.getenv("OPEN_INT_CONFIRM") == "1"
+CONFIRM = os.getenv("APRIL_CONFIRM") == "1"
 if VOICE:
     import voice
 if GUI:
@@ -50,7 +50,7 @@ def ask_command(request):
     return re.sub(r"^```\w*\n?|\n?```$", "", reply).strip()
 
 
-def screenshot(name="open_int_screen.png"):
+def screenshot(name="april_screen.png"):
     path = os.path.join(tempfile.gettempdir(), name)
     subprocess.run(["screencapture", "-x", path], check=True)
     return path
@@ -91,7 +91,7 @@ def run_command(command):
     """Run one shell command, return its combined output.
 
     ponytail: full shell access, no allowlist, no sandbox — that is the point.
-    OPEN_INT_CONFIRM=1 is the opt-in guard.
+    APRIL_CONFIRM=1 is the opt-in guard.
     """
     try:
         out = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)
@@ -164,7 +164,7 @@ def next_request():
 
 
 def confirm(command, app_turn=False):
-    """OPEN_INT_CONFIRM=1 gate. Returns True to run the command.
+    """APRIL_CONFIRM=1 gate. Returns True to run the command.
 
     ponytail: one answer channel at a time, by priority (window > voice > typed),
     to keep the turn-based rule. Typing works in every mode.
@@ -200,7 +200,7 @@ def _state():
 def _apply_setting(key, on):
     """Flip a runtime flag from the browser. Returns a message if it can't."""
     global VOICE, CONFIRM, voice
-    if key == "OPEN_INT_CONFIRM":
+    if key == "APRIL_CONFIRM":
         CONFIRM = bool(on)
     elif key == "VOICE":
         if on and "voice" not in sys.modules:

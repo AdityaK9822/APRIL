@@ -1,6 +1,6 @@
-# Open_INT
+# APRIL
 
-Open_INT is a local macOS assistant that turns a natural-language request into a shell command, runs it locally, and shows the result in the app window or terminal.
+APRIL is a local macOS assistant that turns a natural-language request into a shell command, runs it locally, and shows the result in the app window or terminal.
 
 It is intentionally designed to run on your own machine and to execute real commands. Because of that, it should only be used in an environment where you trust the app and understand the consequences of shell execution.
 
@@ -14,7 +14,7 @@ Use it only on a machine you control, and only if you are comfortable with:
 - possible access to files and system tools on the host
 - the need to review or confirm commands before running them
 
-The app includes an opt-in confirmation gate via `OPEN_INT_CONFIRM=1`, which is off by default.
+The app includes an opt-in confirmation gate via `APRIL_CONFIRM=1`, which is off by default.
 
 ## Features
 

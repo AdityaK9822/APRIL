@@ -1,4 +1,4 @@
-# Open_INT — Roadmap / Future Updates
+# APRIL — Roadmap / Future Updates
 
 Ordered rough priority. Move items to "Done" with a date when shipped.
 
@@ -74,4 +74,4 @@ Ordered rough priority. Move items to "Done" with a date when shipped.
   its 3.14 wheel installs but crashes on init (Metal helper unavailable).
 - 2026-08-29 — Input dispatcher in `main.py` across text / voice / vision,
   with the gesture→action map.
-- 2026-08-29 — Opt-in command confirmation (`OPEN_INT_CONFIRM=1`).
+- 2026-08-29 — Opt-in command confirmation (`APRIL_CONFIRM=1`).
