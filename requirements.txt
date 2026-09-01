@@ -1,0 +1,21 @@
+openai
+python-dotenv
+# App window (AppKit/Quartz via pyobjc) — why the GUI needs no tkinter and no
+# web framework.
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz
+
+# voice mode only (VOICE=1)
+mlx-whisper
+piper-tts
+pvporcupine
+pvrecorder
+
+# parked/vision.py only — nothing in the backend imports it today. Install these
+# if you reconnect it (see parked/README.md).
+# Gestures use Apple's Vision framework, not MediaPipe: the mediapipe 1.0.1
+# wheel installs on 3.14 but crashes on init here (Metal helper unavailable,
+# CPU delegate included). pyobjc keeps it native and in this one venv.
+# opencv-python
+# ultralytics
+# pyobjc-framework-Vision
