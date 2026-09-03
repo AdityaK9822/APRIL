@@ -2,12 +2,32 @@
 
 **An assistant with a body.**
 
+```
+    "build me a bracket"
+           │
+           ▼
+    ┌──────────────┐
+    │   APRIL      │  ◄─ LLM intelligence
+    └──────────────┘
+           │
+    ┌──────┴──────┬──────────┐
+    ▼             ▼          ▼
+ design      fabricate    orchestrate
+ (software)  (devices)    (machine)
+    │             │          │
+    ▼             ▼          ▼
+  PCB         CNC mills    You get it
+ models       3D prints   when ready
+ (real)       (real)
+    │             │
+    └─────┬───────┘
+          ▼
+    [finished bracket]
+```
+
 Devices are its limbs — the computer it runs on, the design software on that
 computer, and the machines it can reach: 3D printers, CNC machines, ESP32
 boards, IoT devices.
-
-You ask for a thing. APRIL designs it, fabricates it, and tells you when to come
-and get it.
 
 The intelligence is an LLM; the point is that it is *attached to something*. An
 assistant that can only answer is a chatbot. APRIL is meant to design a PCB in
@@ -21,6 +41,25 @@ board, and hand you a finished object.
 APRIL acts through three channels. A real project crosses all three, which is
 why none of them is optional.
 
+```
+    ┌────────────────────────────────────┐
+    │         APRIL's Intelligence        │
+    └────────────────────────────────────┘
+            │           │           │
+          ┌─┴───┐     ┌─┴───┐     ┌─┴────┐
+          │     │     │     │     │      │
+        ┌─▼─┐ ┌─▼─┐ ┌─▼─┐ ┌─▼─┐ ┌─▼─┐ ┌─▼─┐
+        │   │ │   │ │   │ │   │ │   │ │   │
+        │ M │ │ M │ │ S │ │ S │ │ D │ │ D │
+        │ A │ │ A │ │ O │ │ O │ │ E │ │ E │
+        │ C │ │ C │ │ F │ │ F │ │ V │ │ V │
+        │   │ │   │ │   │ │   │ │   │ │   │
+        └───┘ └───┘ └───┘ └───┘ └───┘ └───┘
+          │        │        │        │
+        Shell   KiCad   3D Printer
+        Files    CAD    CNC Machine
+```
+
 **The machine** — the computer APRIL runs on. Shell, files, processes, system
 state. The substrate everything else runs on top of.
 
@@ -31,7 +70,7 @@ thing exists before it is real. Half of any build happens here.
 **The devices** — the machines that make things physical. This is where APRIL
 stops being software.
 
-Design happens in the software, fabrication on the devices, orchestration on the
+Design happens in the software → fabrication on the devices → orchestration on the
 machine.
 
 ## The body
@@ -39,6 +78,22 @@ machine.
 APRIL knows what it is currently attached to. Each device is a named limb that
 carries what it is, what it can do, whether it's reachable right now, and how
 dangerous it is.
+
+```
+                    APRIL (core)
+                        │
+          ┌─────────────┬┴┬─────────────┐
+          │             │             │
+       ┌──▼──┐      ┌───▼───┐      ┌──▼──┐
+       │ ESP │      │3D Prnt│      │ CNC │
+       │ 32  │      │       │      │     │
+       │online│     │busy   │      │dead │
+       └──────┘     └───────┘      └─────┘
+       (arm LED)    (printing)    (offline)
+
+   APRIL plans around what's here
+   and what's possible right now.
+```
 
 APRIL plans against the body it actually has, not a hardcoded list. A plan that
 needs the CNC while the CNC is offline is a plan APRIL should know is impossible
@@ -60,9 +115,30 @@ features.
 
 Full system access is a deliberate feature. But a bad shell command and a bad CNC
 command are not the same kind of mistake — one you undo, the other ruins a
-workpiece, breaks a machine, or starts a fire. So the policy splits: the machine,
-the software, and reading anything run free; anything that moves, heats, cuts, or
-flashes is governed by a risk level the device itself declares.
+workpiece, breaks a machine, or starts a fire. So the policy splits:
+
+```
+┌────────────────────────────────────────────┐
+│              APRIL's Actions               │
+└────────────────────────────────────────────┘
+          ▲                        ▲
+          │                        │
+    [LIGHT POLICY]        [HEAVY POLICY]
+          │                        │
+    ┌─────┴──────┐          ┌──────┴─────┐
+    │            │          │            │
+  Machine    Software     Device Risk   Device Risk
+  (shell)    (read CAD)      Level A      Level B
+   │          │              │            │
+   ▼          ▼              ▼            ▼
+  runs       runs          confirm?     stop signal?
+  free       free          review       manual arm?
+             no guards     then run
+             opt-in only
+```
+
+The machine, the software, and reading anything run free. Anything that moves,
+heats, cuts, or flashes is governed by a risk level the device itself declares.
 
 Run it on a machine you control, a network you trust, and next to a workshop you
 can reach the power switch in.
@@ -90,27 +166,55 @@ back when that is no longer true.
 
 ## Roadmap
 
-Two tracks, built in parallel.
+Two tracks, built in parallel and converging at proof points.
 
-**Intelligence** — hold a conversation, then act through tools, then the
-integration and skill pattern proven on one real tool, then subagents, then
-session memory.
+```
+INTELLIGENCE                      BODY
+─────────────                      ────
 
-**Body** — one device read reliably, then a registry of devices as named limbs
-with capability and liveness, then the risk policy, then the first actuation: a
-physical device doing something small, cheap and reversible because APRIL decided
-it should.
+Talk ───────┐                  ┌─ One limb
+            │                  │
+Act ────────┤                  ├─ Registry
+            │                  │
+Skills ─────┤  ┌───────────────┤  Risk policy
+            │  │               │
+Subagents ──┤  │ ┌─────────────┤  First actuation
+            │  │ │             │
+Memory ─────┘  │ │  ╔═════════════╗
+               │ │  ║ Proof Point ║
+               └─╫─ ║ Read body   ║
+                 │  ║ State live  ║
+                 │  ╚═════════════╝
+                 │
+                 │  ╔═════════════════════════════╗
+                 ├─ ║ Proof Point 2: One machine, ║
+                 │  ║ one object. Design → print  ║
+                 │  ║ (CAD + 3D printer)          ║
+                 │  ╚═════════════════════════════╝
+                 │
+                 │  ╔════════════════════════════╗
+                 └─ ║ Proof Point 3: Full build  ║
+                    ║ PCB in EDA, mill/solder    ║
+                    ║ on CNC, print case, flash  ║
+                    ╚════════════════════════════╝
 
-They converge at three proof points, in order:
+           [everything below is deferred]
 
-1. **Read the body.** APRIL reliably sees and reports the live state of every
-   connected device.
-2. **One machine, one object.** *"Print me a bracket that holds this board at
-   30°"* — APRIL drives CAD to model it, slices it, sends it to the printer, and
-   tells you when to collect it. One software tool, one device, no human step in
-   the middle. If this works, the idea works.
-3. **The full build.** Design a PCB in EDA software, mill and solder it on the
-   CNC, print the enclosure, flash the board.
+         MoE, voice, vision, apps, backend API
+```
+
+**Intelligence track:**
+- Hold a conversation
+- Act through tools
+- The integration + skill pattern proven on one real tool
+- Subagents
+- Session memory
+
+**Body track:**
+- One device read reliably
+- A registry of devices as named limbs with capability and liveness
+- The risk policy
+- The first actuation: a physical device doing something small, cheap and reversible because APRIL decided it should
 
 ## Running
 
