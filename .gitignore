@@ -1,4 +1,8 @@
 .env
+
+# Agent working context — the project's own planning document. Kept local.
+CLAUDE.md
+
 OpenINT/
 OpenINT.xcodeproj/
 .venv/
