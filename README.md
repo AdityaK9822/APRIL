@@ -43,7 +43,7 @@ why none of them is optional.
 
 ```
     ┌────────────────────────────────────┐
-    │         APRIL's Intelligence        │
+    │         APRIL's Intelligence       │
     └────────────────────────────────────┘
             │           │           │
           ┌─┴───┐     ┌─┴───┐     ┌─┴────┐
@@ -56,8 +56,8 @@ why none of them is optional.
         │   │ │   │ │   │ │   │ │   │ │   │
         └───┘ └───┘ └───┘ └───┘ └───┘ └───┘
           │        │        │        │
-        Shell   KiCad   3D Printer
-        Files    CAD    CNC Machine
+        Shell   KiCad       3D Printer
+        Files    CAD        CNC Machine
 ```
 
 **The machine** — the computer APRIL runs on. Shell, files, processes, system
