@@ -3,26 +3,15 @@
 **An assistant with a body — and the body is the networked physical world.**
 
 ```
-        "what's at the door?"     "turn the AC off"
-        "audit my wifi"           "print me a bracket"
-                       \             /
-                        ▼           ▼
-                  ┌───────────────────────┐
-                  │        APRIL          │  ◄─ LLM intelligence
-                  │  plan · dispatch ·    │
-                  │      review           │
-                  └───────────────────────┘
-                            │
-        ┌──────────┬────────┼────────┬──────────┐
-        ▼          ▼        ▼        ▼          ▼
-      SEE        SENSE     ACT     NETWORK    BUILD
-     camera      ECG/EEG   lights   wifi      CAD → CNC
-     + vision    sensors   robots   audit     → 3D print
-        │          │        │        │          │
-        └──────────┴────────┴────────┴──────────┘
-                            ▼
-                  the physical world,
-                  reached over the network
+   you ──▶  APRIL ──▶  the networked physical world
+            (LLM)
+              │
+              ├──▶  SEE      cameras + a vision model
+              ├──▶  SENSE    ECG · EEG · telemetry
+              ├──▶  ACT      lights · AC · robot arms
+              ├──▶  NETWORK  discovery · authorized wifi audits
+              ├──▶  BUILD    CAD → CNC → 3D print → flash
+              └──▶  …        new limbs slot in the same way
 ```
 
 APRIL's limbs are the machines it can reach over the network: the computer it
@@ -69,28 +58,72 @@ when a project needs them.)
 
 ---
 
+## What you could build with it
+
+The point of a body is what you can do with it. Each of these is one request →
+one plan → real devices, crossing the pillars end to end. **None is built yet** —
+this is what the body is *for*, and the shape of the projects APRIL is being built
+to run.
+
+**👁  See — cameras + a vision model**
+> *"Who's at the gate?"* — APRIL pulls the camera feed, a vision subagent
+> describes what's in frame, and answers. Point it at a room, a doorway, a
+> workbench: it has eyes wherever there's a lens on the network.
+
+**🩺  Sense — sensors and instruments**
+> *"Log my ECG for the next hour and flag anything odd."* — APRIL reads an
+> ESP-connected ECG/EEG or environmental sensor and keeps the trace on your
+> machine. A reasoning agent over live medical or lab telemetry.
+
+**💡  Act — appliances and actuators**
+> *"It's too warm in here."* — APRIL reads the room and switches the AC; dims a
+> light; flips a plug. Home automation where the logic is an LLM, not a rigid
+> rule, so "make it cosy" is a command it can actually reason about.
+
+**🦾  Robotics — custom microcontrollers**
+> *"Sweep the left shelf."* — APRIL drives a robot arm built on an ESP32 or
+> similar MCU. Any hardware you can flash and reach becomes a limb it can
+> command, with the skill for that rig loaded from the library.
+
+**📡  Network — authorized security work**
+> *"Audit my home network."* — APRIL discovers what's connected, probes it at the
+> packet level, and hands back a clean report of weak spots. **Only on networks
+> you own or are explicitly authorized to test** — a workshop tool, not a weapon.
+
+**🏭  Industrial — reasoning over a control loop**
+> Replace a warehouse's fixed batch schedule or a manual control loop with an
+> agent that reasons about the line in real time and adjusts as conditions
+> change.
+
+**🛠  Build — a sentence to a finished object** *(the flagship)*
+> *"Print me a bracket that holds this board at 30°."* — APRIL models it in CAD,
+> slices it, runs the printer, and tells you when to collect it. Pushed all the
+> way: **design a PCB in EDA → mill and solder it on the CNC → print the
+> enclosure → flash the firmware** — one request, a working device in your hand.
+
+---
+
 ## The three pillars
 
 APRIL acts through three channels. A real project crosses all three, which is why
 none of them is optional.
 
 ```
-    ┌───────────────────────────────────────────────┐
-    │                   APRIL                        │
-    └───────────────────────────────────────────────┘
-        │                  │                   │
-   ┌────▼────┐       ┌─────▼──────┐      ┌─────▼──────┐
-   │ MACHINE │       │  SOFTWARE  │      │  DEVICES   │
-   │         │       │            │      │            │
-   │ shell   │       │ design/EDA │      │ cameras    │
-   │ files   │       │ vision     │      │ sensors    │
-   │ system  │       │ network    │      │ appliances │
-   │ state   │       │ tooling    │      │ robots/MCU │
-   │         │       │            │      │ printers   │
-   └─────────┘       └────────────┘      └────────────┘
-   orchestrate        reason/design      sense & act
-        │                  │                   │
-        └──────── network: the connective tissue ────────┘
+   one request crosses all three:
+
+   ┌─ 1 · THE MACHINE    orchestrate
+   │     the computer it runs on — shell, files, system
+   │     state. the substrate; the reason for full access.
+   │
+   ├─ 2 · THE SOFTWARE   reason & design
+   │     the apps it drives — design tools (EDA, CAD,
+   │     slicers), vision models, network/security tooling.
+   │
+   └─ 3 · THE DEVICES    sense & act
+         everything physical on the network — cameras,
+         sensors, appliances, robots, MCUs, machines.
+
+   the network is the connective tissue between them.
 ```
 
 **The machine** — the computer APRIL runs on. The substrate, and the reason full
@@ -113,18 +146,16 @@ carries what it is, what it can do, whether it's reachable, and how dangerous it
 is.
 
 ```
-                       APRIL (core)
-                            │
-        ┌──────────┬────────┼────────┬──────────┐
-        ▼          ▼        ▼        ▼          ▼
-     ┌─────┐   ┌──────┐  ┌─────┐  ┌──────┐  ┌──────┐
-     │ cam │   │sensor│  │ AC  │  │robot │  │ CNC  │
-     │online│  │online│  │ off │  │ idle │  │offline│
-     └─────┘   └──────┘  └─────┘  └──────┘  └──────┘
-       see      sense     act     actuate    build
+   APRIL (core) — the body it has right now:
 
-   APRIL plans around what's here and what's
-   possible right now — not a hardcoded list.
+      ├──  camera        online    ·  ready to see
+      ├──  ECG sensor    online    ·  ready to sense
+      ├──  smart light   off       ·  ready to act
+      ├──  robot arm     idle      ·  ready to actuate
+      └──  CNC mill      offline   ·  can't be used in a plan
+
+   APRIL plans around what's here and reachable right now —
+   never a hardcoded list.
 ```
 
 A plan that needs the CNC while the CNC is offline is a plan APRIL should know is
@@ -136,14 +167,20 @@ Full system access is deliberate. But a wide body means more than one kind of
 mistake, so the policy has three axes:
 
 ```
-  PHYSICAL RISK          NETWORK AUTH           DATA SENSITIVITY
-  (per device)           (the hard line)        (reads aren't free)
-        │                      │                       │
-  moves/heats/cuts?      your network or        a home camera?
-  device declares        one you're             an ECG?
-  its risk level;        authorized to test.    sensing carries
-  higher = more          not opt-in, not        weight even when
-  checks first.          negotiable.            it moves nothing.
+   three axes of risk:
+
+   ┌─ PHYSICAL   moves, heats, cuts, flashes?
+   │             each device declares its own risk level;
+   │             higher risk → more checks before it acts.
+   │
+   ├─ NETWORK    auditing and packet work are scoped to
+   │             networks you own or may test. a hard line.
+   │
+   └─ DATA       a home camera, an ECG — sensing carries
+                 weight even when it moves nothing.
+
+   everything else — machine, software, ordinary reads —
+   runs light: free, no prompt.
 ```
 
 Everything else — the machine, the software, ordinary reads — runs light: free,
