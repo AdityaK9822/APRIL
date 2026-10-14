@@ -1,0 +1,118 @@
+/* APRIL TUI Styles */
+
+Screen {
+    layout: grid;
+    grid-size: 100%;
+}
+
+Header {
+    dock: top;
+    height: 3;
+    background: $surface;
+    color: $text;
+}
+
+Footer {
+    dock: bottom;
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+}
+
+#status-label,
+#stats-label,
+#msg-label {
+    text-style: bold;
+    background: $primary;
+    color: $text;
+    padding: 1;
+    margin-bottom: 1;
+}
+
+#status-display {
+    min-height: 4;
+    padding: 1;
+    background: $panel;
+    border: solid $primary;
+}
+
+#stats-display {
+    min-height: 5;
+    padding: 1;
+    background: $panel;
+    border: solid $secondary;
+}
+
+#messages {
+    height: 100%;
+    padding: 1;
+    background: $panel;
+    border: solid $success;
+}
+
+#logs {
+    height: 8;
+    padding: 1;
+    background: $panel;
+    border: solid $warning;
+    display: none;
+}
+
+.Label {
+    text-style: bold;
+    color: $text;
+}
+
+.Static {
+    color: $text;
+}
+
+.TextInput {
+    background: $surface;
+    border: solid $primary;
+}
+
+.TextInput:focus {
+    border: solid $success;
+}
+
+.TextInput::Placeholder {
+    color: $text-muted;
+}
+
+Button {
+    background: $primary;
+    color: $text;
+}
+
+Button:hover {
+    background: $secondary;
+}
+
+Button:focus {
+    background: $success;
+}
+
+Sidebar {
+    width: 25%;
+    height: 100%;
+    background: $panel;
+    border: solid $primary;
+    padding: 1;
+}
+
+.MainContent {
+    width: 75%;
+    height: 100%;
+    background: $panel;
+    border: solid $secondary;
+    padding: 1;
+}
+
+.Container {
+    columns: 2;
+}
+
+.Vertical {
+    margin: 1;
+}

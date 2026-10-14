@@ -5,7 +5,8 @@ from .agent import AgentRuntime
 from .session import Session, SessionManager
 from .database import MemoryDatabase
 from .memory_extractor import MemoryExtractor
-from .tui import APRIL_TUI, ConsoleRenderer
+from .tui import APRIL_TUI, ConsoleRenderer as curses_ConsoleRenderer
+from .textual_tui import APRILApp, ConsoleRenderer as textual_ConsoleRenderer
 
 __all__ = [
     'AgentConfig', 
@@ -14,6 +15,10 @@ __all__ = [
     'SessionManager',
     'MemoryDatabase',
     'MemoryExtractor',
+    # Legacy curses TUI
     'APRIL_TUI',
-    'ConsoleRenderer'
+    'curses_ConsoleRenderer',
+    # New Textual TUI
+    'APRILApp',
+    'textual_ConsoleRenderer',
 ]
