@@ -1,0 +1,119 @@
+/* APRIL Textual TUI - Main Stylesheet */
+
+Screen {
+    background: #0a0a0a;
+    color: #e0e0e0;
+}
+
+/* Header styling */
+Header {
+    dock: top;
+    height: 3;
+    background: #1e3a8a;
+    color: #ffffff;
+    padding: 1;
+    border-bottom: solid #3b82f6;
+}
+
+/* Main content area */
+#message-list {
+    height: 1fr;
+    background: #1a1a1a;
+    border: solid #1e3a8a;
+    padding: 1;
+}
+
+.message {
+    padding: 1;
+    margin: 1 0;
+}
+
+.message-user {
+    color: #60a5fa;
+    text-style: bold;
+}
+
+.message-assistant {
+    color: #4ade80;
+    text-style: bold;
+}
+
+.message.system {
+    color: #9ca3af;
+    text-style: italic;
+}
+
+/* Stats panel - right sidebar */
+StatsWidget {
+    width: 25%;
+    height: 1fr;
+    background: #1a1a1a;
+    border: solid #4b5563;
+    padding: 1;
+}
+
+.stat-label {
+    text-style: bold;
+    color: #1e3a8a;
+}
+
+.stat-value {
+    color: #e0e0e0;
+}
+
+/* Log panel - bottom */
+LogPanel {
+    height: 8;
+    background: #1a1a1a;
+    border: solid #f59e0b;
+    padding: 1;
+    display: block;
+}
+
+.log-debug {
+    color: #6b7280;
+}
+
+.log-info {
+    color: #9ca3af;
+}
+
+.log-warning {
+    color: #f59e0b;
+}
+
+.log-error {
+    color: #ef4444;
+    text-style: bold;
+}
+
+/* Footer styling */
+Footer {
+    dock: bottom;
+    height: 1;
+    background: #1e3a8a;
+    color: #ffffff;
+}
+
+/* Input field - bottom */
+#user-input {
+    dock: bottom;
+    height: 3;
+    background: #0a0a0a;
+    border: solid #3b82f6;
+    padding: 1;
+    margin-top: 1;
+}
+
+#user-input:focus {
+    border: solid #4ade80;
+    background: #1a1a1a;
+}
+
+/* Status widget */
+StatusWidget {
+    min-height: 3;
+    background: #1e3a8a;
+    border: solid #4ade80;
+    padding: 1;
+}

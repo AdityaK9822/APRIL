@@ -1,7 +1,13 @@
 """
-APRIL CLI
+APRIL CLI (Backend Logger)
 
-Command-line interface for interacting with APRIL agent.
+DEPRECATED: Use python main.py instead.
+
+This file is kept for backward compatibility.
+The main entry point is now: python main.py
+It launches the TUI with a backend CLI logger.
+
+For direct CLI access, use: python cli/main.py
 """
 
 import sys
