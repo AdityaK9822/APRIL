@@ -4,7 +4,7 @@ APRIL Agent Runtime
 The core agent loop: manage context, call LLM, process tool calls.
 """
 
-from typing import List, Dict, Optional, Callable, AsyncGenerator
+from typing import List, Dict, Optional, Callable, AsyncGenerator, Any
 import json
 import threading
 import os
@@ -14,7 +14,9 @@ from .config import AgentConfig
 from .session import Session
 from .database import MemoryDatabase
 from .memory_extractor import MemoryExtractor
-from .logging import get_logger, debug, info, warning, error
+from .logger import APRILLogger, get_logger
+from .backend_logger import BackendLoggerBridge
+from .events import get_event_bus, Event, LogEvent, ErrorEvent, StatusEvent
 from tools.shell import ShellTool
 
 
@@ -24,12 +26,6 @@ class AgentRuntime:
     
     Manages conversation with an LLM, processes tool calls, and
     maintains session state.
-    
-    Example:
-        >>> config = AgentConfig.from_env()
-        >>> agent = AgentRuntime(config)
-        >>> response = agent.run("What files are in this directory?")
-        >>> print(response)
     """
     
     def __init__(self, config: AgentConfig, tools: Optional[List] = None):
@@ -53,9 +49,9 @@ class AgentRuntime:
             try:
                 self.db = MemoryDatabase(config.memory_db_path)
                 self.extractor = MemoryExtractor(model=config.memory_extraction_model)
-                self.extractor._client = self.client  # Use same OpenAI client
+                self.extractor._client = self.client
             except Exception as e:
-                print(f"Warning: Could not initialize memory: {e}")
+                self._emit_error("memory_init", str(e))
         
         # Create session with database
         self.session = Session(db=self.db)
@@ -71,10 +67,21 @@ class AgentRuntime:
         
         # Build tool name -> instance map
         self.tool_map = {t.name: t for t in self.tools}
+        
+        # Event bus
+        self._event_bus = get_event_bus()
+    
+    def _emit_error(self, error_type: str, message: str, details: Dict = None):
+        """Emit error event."""
+        self._event_bus.emit(ErrorEvent(error_type=error_type, message=message, details=details))
+    
+    def _emit_status(self, status: str, metadata: Dict = None):
+        """Emit status event."""
+        self._event_bus.emit(StatusEvent(status=status, metadata=metadata or {}))
     
     def _process_tool_calls(self, tool_calls: List) -> List[Dict]:
         """
-        Process tool calls from LLM response
+        Process tool calls from LLM response.
         
         Args:
             tool_calls: List of tool call objects from API
@@ -88,7 +95,6 @@ class AgentRuntime:
             tool_name = call.function.name
             tool_args = json.loads(call.function.arguments)
             
-            # Find tool
             if tool_name not in self.tool_map:
                 results.append({
                     'tool_call_id': call.id,
@@ -98,18 +104,15 @@ class AgentRuntime:
                 })
                 continue
             
-            # Execute tool
             tool = self.tool_map[tool_name]
             
             try:
-                # Call tool execute method
                 if tool_name == 'shell_execute':
                     result = tool.execute(
                         command=tool_args.get('command'),
                         timeout=tool_args.get('timeout', 30)
                     )
                 else:
-                    # Generic tool call
                     result = tool.execute(**tool_args)
                 
                 results.append({
@@ -131,7 +134,7 @@ class AgentRuntime:
     
     def run(self, user_input: str, max_iterations: Optional[int] = None) -> str:
         """
-        Run the agent loop
+        Run the agent loop.
         
         Args:
             user_input: User message
@@ -139,14 +142,13 @@ class AgentRuntime:
             
         Returns:
             Final response string
-            
-        Example:
-            >>> agent = AgentRuntime(config)
-            >>> response = agent.run('List files')
-            >>> print(response)
         """
         if max_iterations is None:
             max_iterations = self.config.max_iterations
+        
+        # Log user message
+        truncated = user_input[:100] + "..." if len(user_input) > 100 else user_input
+        self._event_bus.emit(LogEvent(level="INFO", source="user", message=truncated))
         
         # Augment context with relevant memories
         self._augment_context_with_memories(user_input)
@@ -160,6 +162,9 @@ class AgentRuntime:
         # Agent loop
         iterations = 0
         while iterations < max_iterations:
+            # Log LLM request
+            self._event_bus.emit(LogEvent(level="INFO", source="llm", message=f"Request to {self.config.model} ({len(self.session.context)} messages)"))
+            
             # Call LLM
             response = self.client.chat.completions.create(
                 model=self.config.model,
@@ -169,6 +174,9 @@ class AgentRuntime:
             )
             
             message = response.choices[0].message
+            
+            # Log LLM response
+            self._event_bus.emit(LogEvent(level="INFO", source="llm", message=f"Response from {self.config.model}"))
             
             # Check if we need to process tool calls
             if message.tool_calls:
@@ -191,6 +199,11 @@ class AgentRuntime:
                 # Process tool calls
                 tool_results = self._process_tool_calls(message.tool_calls)
                 
+                # Log tool executions
+                for result in tool_results:
+                    tool_name = result.get('name', 'unknown')
+                    self._event_bus.emit(LogEvent(level="INFO", source="tool", message=f"Calling: {tool_name}"))
+                
                 # Add tool results to context
                 for result in tool_results:
                     self.session.context.append(result)
@@ -206,6 +219,9 @@ class AgentRuntime:
             if final_response:
                 self._save_conversation_turn('assistant', final_response)
                 self._extract_and_store_memories()
+            
+            # Log agent response
+            self._event_bus.emit(LogEvent(level="INFO", source="agent", message=final_response[:100] + "..." if len(final_response) > 100 else final_response))
             
             return final_response
         
@@ -265,12 +281,11 @@ class AgentRuntime:
             if not messages:
                 return
             
-            info(f"Starting memory extraction for {len(messages)} messages")
+            self._event_bus.emit(LogEvent(level="DEBUG", source="memory", message=f"Extracting memories from {len(messages)} messages"))
             
-            # Extract memories
             memories = self.extractor.extract(messages, client=self.client)
             
-            info(f"Extracted {len(memories)} memories")
+            self._event_bus.emit(LogEvent(level="DEBUG", source="memory", message=f"Extracted {len(memories)} memories"))
             
             # Store memories
             for memory in memories:
@@ -287,10 +302,10 @@ class AgentRuntime:
             message_ids = [m['id'] for m in messages]
             self.db.mark_processed(message_ids)
             
-            info(f"Marked {len(message_ids)} messages as processed")
+            self._event_bus.emit(LogEvent(level="DEBUG", source="memory", message=f"Marked {len(message_ids)} messages as processed"))
             
         except Exception as e:
-            error(f"Memory extraction failed: {e}")
+            self._emit_error("memory_extraction", str(e))
     
     def run_conversation(self, user_messages: List[str]) -> str:
         """
@@ -308,8 +323,9 @@ class AgentRuntime:
         return response
     
     def clear_context(self) -> None:
-        """Clear conversation context"""
+        """Clear conversation context."""
         self.session.clear()
+        self._event_bus.emit(LogEvent(level="INFO", source="session", message="Context cleared"))
     
     def get_context_summary(self) -> Dict:
         """
@@ -324,28 +340,154 @@ class AgentRuntime:
             'created_at': self.session.created_at.isoformat(),
             'tools_available': list(self.tool_map.keys())
         }
+    
+    # Async streaming methods
+    async def run_streaming(self, user_input: str, max_iterations: Optional[int] = None) -> AsyncGenerator[str, None]:
+        """
+        Async streaming version of run.
+        
+        Yields tokens as they arrive from the model.
+        """
+        if max_iterations is None:
+            max_iterations = self.config.max_iterations
+        
+        # Emit start events
+        msg_id = self._event_bus.emit_message_start(is_assistant=True)
+        self._event_bus.emit_status("thinking", {"user_input": user_input[:50]})
+        
+        # Log user message
+        truncated = user_input[:100] + "..." if len(user_input) > 100 else user_input
+        self._event_bus.emit(LogEvent(level="INFO", source="user", message=truncated))
+        
+        # Augment context
+        self._augment_context_with_memories(user_input)
+        self._save_conversation_turn('user', user_input)
+        self.session.add_message('user', user_input)
+        
+        # Agent loop
+        iterations = 0
+        while iterations < max_iterations:
+            # Emit status
+            self._event_bus.emit_status("streaming" if iterations == 0 else "running_tool")
+            
+            # Log LLM request
+            self._event_bus.emit(LogEvent(level="INFO", source="llm", message=f"Request to {self.config.model} ({len(self.session.context)} messages)"))
+            
+            # Call LLM
+            response = self.client.chat.completions.create(
+                model=self.config.model,
+                messages=self.session.context,
+                tools=self.tool_schemas,
+                temperature=self.config.temperature,
+                stream=True  # Enable streaming
+            )
+            
+            full_response = ""
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    token = chunk.choices[0].delta.content
+                    full_response += token
+                    yield token
+                    self._event_bus.emit_message_delta(token, is_assistant=True, is_complete=False)
+            
+            # Complete message
+            self._event_bus.emit_message_delta("", is_assistant=True, is_complete=True)
+            
+            # Check for tool calls in final message
+            message = response.choices[0].message if hasattr(response, 'choices') else None
+            if not message:
+                # Get from accumulated chunks
+                message = type('obj', (object,), {
+                    'content': full_response,
+                    'tool_calls': None
+                })()
+            
+            if message.tool_calls:
+                # Tool calls - emit start
+                self._event_bus.emit_status("running_tool", {"tool_calls": len(message.tool_calls)})
+                
+                for tc in message.tool_calls:
+                    tool_name = tc.function.name
+                    tool_args = json.loads(tc.function.arguments)
+                    self._event_bus.emit_tool_call_start(tool_name, tool_args, tc.id)
+                
+                # Process tool calls
+                tool_results = self._process_tool_calls(message.tool_calls)
+                
+                for result in tool_results:
+                    tool_name = result.get('name', 'unknown')
+                    self._event_bus.emit_tool_call_output(result.get('tool_call_id', ''), f"Result from {tool_name}")
+                    self._event_bus.emit_tool_call_done(tool_name, result.get('content', ''), result.get('tool_call_id', ''), True)
+                
+                # Add to context
+                self.session.context.append({
+                    'role': 'assistant',
+                    'content': message.content,
+                    'tool_calls': [
+                        {
+                            'id': tc.id,
+                            'type': 'function',
+                            'function': {'name': tc.function.name, 'arguments': tc.function.arguments}
+                        } for tc in message.tool_calls
+                    ]
+                })
+                
+                for result in tool_results:
+                    self.session.context.append(result)
+                
+                iterations += 1
+                continue
+            
+            # No tool calls
+            self.session.add_message('assistant', full_response)
+            
+            if full_response:
+                self._save_conversation_turn('assistant', full_response)
+                self._extract_and_store_memories()
+            
+            self._event_bus.emit_message_done(msg_id, full_response, is_assistant=True)
+            self._event_bus.emit_status("idle")
+            
+            return
+        
+        self._event_bus.emit_status("idle")
+        yield f'Reached maximum iterations ({max_iterations}) without completing.'
+    
+    # Thread-safe cancellation support
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls._cancellation_tokens = {}
+    
+    def request_cancel(self, session_id: str = None):
+        """Request cancellation of current operation."""
+        if session_id is None:
+            session_id = self.session.id
+        self._cancellation_tokens[session_id] = True
+    
+    def is_cancellation_requested(self, session_id: str = None) -> bool:
+        """Check if cancellation was requested."""
+        if session_id is None:
+            session_id = self.session.id
+        return self._cancellation_tokens.get(session_id, False)
+    
+    def clear_cancellation(self, session_id: str = None):
+        """Clear cancellation flag."""
+        if session_id is None:
+            session_id = self.session.id
+        self._cancellation_tokens.pop(session_id, None)
 
 
 # Example usage
 if __name__ == '__main__':
-    # Test with environment config
     try:
+        from core.config import AgentConfig
         config = AgentConfig.from_env()
         print(f'Loaded config: model={config.model}')
-        print(f'Memory enabled: {config.memory_enabled}')
-        if config.memory_enabled:
-            print(f'Memory DB path: {config.memory_db_path}')
         
         agent = AgentRuntime(config)
         print(f'Agent initialized with tools: {list(agent.tool_map.keys())}')
-        print(f'Session: {agent.session.id}')
-        
-        if agent.db:
-            print(f'Database initialized successfully')
-            print(f'Stats: {agent.db.get_stats()}')
         
     except Exception as e:
         print(f'Error: {e}')
         import traceback
         traceback.print_exc()
-        print('Make sure to set up .env with OPENAI_API_KEY and OPENAI_API_BASE_URL')

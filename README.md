@@ -11,7 +11,8 @@
               ├──▶  ACT      lights · AC · robot arms
               ├──▶  NETWORK  discovery · authorized wifi audits
               ├──▶  BUILD    CAD → CNC → 3D print → flash
-              └──▶  …        new limbs slot in the same way
+              ├──▶  …        new limbs slot in the same way
+              └──▶  TUI      Textual terminal interface (modern, async)
 ```
 
 APRIL's limbs are the machines it can reach over the network: the computer it
@@ -88,7 +89,7 @@ to run.
 **📡  Network — authorized security work**
 > *"Audit my home network."* — APRIL discovers what's connected, probes it at the
 > packet level, and hands back a clean report of weak spots. **Only on networks
-> you own or are explicitly authorized to test** — a workshop tool, not a weapon.
+> you own or are authorized to test** — a workshop tool, not a weapon.
 
 **🏭  Industrial — reasoning over a control loop**
 > Replace a warehouse's fixed batch schedule or a manual control loop with an
@@ -178,7 +179,7 @@ mistake, so the policy has three axes:
    │
    └─ DATA       a home camera, an ECG — sensing carries
                  weight even when it moves nothing.
-
+   │
    everything else — machine, software, ordinary reads —
    runs light: free, no prompt.
 ```
@@ -198,11 +199,29 @@ there is no telemetry.
 
 ## Status
 
-**In design. Nothing is built yet.**
+**In development. Core systems being built.**
 
-There is no harness, no tool set, no subagents, no device registry, and no
-persistence. This repository currently holds the plan and the configuration
-surface; the code is being written from scratch against it.
+The harness is in place — a module-based structure with async agent runtime,
+database, and tooling. The Textual TUI is ready for testing with event bus,
+streaming, and IPC.
+
+### What's Available
+
+- ✅ Textual TUI - Modern terminal interface
+- ✅ Agent Runtime - Async conversation engine
+- ✅ Event Bus - Decoupled agent-UI-logger communication
+- ✅ Streaming - Token-by-token message delivery
+- ✅ IPC - Separate logger process via Unix socket/TCP
+- ✅ Memory Database - SQLite with connection pooling
+- ✅ Tools Framework - Extensible tool system
+- ✅ Structured Logging - Backend logger with IPC bridge
+
+### Pending
+
+- ❌ Device Registry - Dynamic endpoint management
+- ❌ Subagents - Specialized agent instances
+- ❌ Device Discovery - Network scanning
+- ❌ Plan Execution - Task orchestration
 
 An earlier generation — a macOS app with voice and vision — was removed
 deliberately. It was built before the harness underneath it existed. It comes
@@ -253,3 +272,168 @@ provider. Which model runs it is your decision:
 No model is named on purpose. Local is the preferred default and going off-box is
 a decision — a preference about *where* the work runs, not a commitment to a
 particular model.
+
+---
+
+## Usage
+
+### Basic
+
+```bash
+python main.py
+```
+
+This opens the TUI and a separate logger tab.
+
+### Single Pane Mode (no separate logger tab)
+
+```bash
+python main.py --single-pane
+```
+
+All output (including logs) shows in the same terminal window.
+
+### Without Agent (TUI-only mode)
+
+```bash
+python main.py --no-agent
+```
+
+Run the TUI without connecting to an LLM. Useful for testing the interface.
+
+### Debug Logging
+
+```bash
+python main.py --log-level DEBUG
+```
+
+Show detailed logs including LLM requests, tool calls, and memory operations.
+
+### CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `-m, --model MODEL` | Override model from config |
+| `--log-level LEVEL` | Backend logger level (DEBUG/INFO/WARNING/ERROR) |
+| `--log-file FILE` | Path to backend log file |
+| `--max-iterations N` | Maximum tool call iterations (default: 100) |
+| `--show-logs` | Show log panel in TUI (default: hidden) |
+| `--no-agent` | Run TUI without agent |
+| `-s, --single-pane` | Run in single pane mode |
+| `-n, --no-spawn` | Don't spawn new terminals |
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Alt+Enter` | Add newline (multiline input) |
+| `Ctrl+C` | Cancel current generation |
+| `Ctrl+L` | Toggle log panel |
+| `Ctrl+S` | Show stats |
+| `Ctrl+Q` or `Esc` | Quit |
+| `/help` | Show slash commands |
+
+### Slash Commands
+
+Type `/command` in the input field:
+
+| Command | Description |
+|---------|-------------|
+| `/clear` | Clear conversation |
+| `/quit` | Exit application |
+| `/help` | Show help |
+
+---
+
+## IPC Protocol
+
+The logger connects to the TUI via Unix socket (macOS/Linux) or TCP (Windows).
+
+### Event Format
+
+Each line is a JSON object:
+
+```json
+{
+  "type": "message.delta|tool_call.start|tool_call.output|tool_call.done|log|error|status",
+  "payload": { ... },
+  "timestamp": "2024-01-01T00:00:00.000000",
+  "id": "abc12345"
+}
+```
+
+### Log Levels
+
+- `DEBUG` - Detailed debugging info (dimmed in display)
+- `INFO` - Normal operational messages
+- `WARNING` - Warning messages (yellow)
+- `ERROR` - Error messages (red)
+
+### Sensitive Data Redaction
+
+API keys, tokens, and secrets are automatically redacted in logs. Output patterns
+like `api_key=...` or `token=...` are replaced with `***REDACTED***`.
+
+---
+
+## Project Structure
+
+```
+Open_INT/
+├── main.py              # Entry point with launcher
+├── launcher.py          # Spawns TUI + logger tabs
+├── core/
+│   ├── __init__.py      # Module exports
+│   ├── agent.py         # Core agent runtime
+│   ├── events.py        # Event bus and event types
+│   ├── ipc_server.py    # IPC server for logger
+│   ├── ipc_logger.py    # Logger subprocess
+│   ├── textual_tui.py   # Main Textual app
+│   ├── config.py        # Configuration
+│   ├── session.py       # Session management
+│   ├── database.py      # SQLite memory DB
+│   ├── logger.py        # Structured logging
+│   ├── backend_logger.py # Backend logger bridge
+│   └── widgets/         # Textual widgets
+│       ├── status.py
+│       ├── messages.py
+│       ├── input.py
+│       ├── logs.py
+│       └── stats.py
+├── tools/
+│   ├── __init__.py
+│   └── shell.py
+└── tests/
+    ├── test_core.py
+    ├── test_memory.py
+    └── test_tui.py
+```
+
+---
+
+## Known Limitations
+
+1. **Markdown rendering** - Basic support (code, bold, italic, links). Not full CommonMark.
+2. **Long output truncation** - Tool output > 5000 chars truncated with marker.
+3. **Session persistence** - Memory DB only. No CLI save/load yet.
+4. **Platform support** - tmux detach detection is a known issue.
+5. **Multi-user** - Not supported. Single session per process.
+
+---
+
+## Testing
+
+```bash
+# Run widget tests
+python test_textual_tui.py
+
+# Run core tests (requires pytest)
+python -m pytest tests/ -v
+```
+
+---
+
+## License
+
+MIT
