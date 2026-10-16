@@ -29,6 +29,13 @@ class AgentRuntime:
     """
     
     def __init__(self, config: AgentConfig, tools: Optional[List] = None):
+        """
+        Initialize agent runtime
+        
+        Args:
+            config: Agent configuration
+            tools: List of tool instances (default: ShellTool)
+        """
         self.config = config
         self.client = OpenAI(
             api_key=config.api_key,
@@ -73,7 +80,15 @@ class AgentRuntime:
         self._event_bus.emit(StatusEvent(status=status, metadata=metadata or {}))
     
     def _process_tool_calls(self, tool_calls: List) -> List[Dict]:
-        """Process tool calls from LLM response."""
+        """
+        Process tool calls from LLM response.
+        
+        Args:
+            tool_calls: List of tool call objects from API
+            
+        Returns:
+            List of tool result messages
+        """
         results = []
         
         for call in tool_calls:
@@ -118,7 +133,16 @@ class AgentRuntime:
         return results
     
     def run(self, user_input: str, max_iterations: Optional[int] = None) -> str:
-        """Synchronous run method for backward compatibility."""
+        """
+        Run the agent loop.
+        
+        Args:
+            user_input: User message
+            max_iterations: Maximum tool call iterations (default: from config)
+            
+        Returns:
+            Final response string
+        """
         if max_iterations is None:
             max_iterations = self.config.max_iterations
         
@@ -129,7 +153,7 @@ class AgentRuntime:
         # Augment context with relevant memories
         self._augment_context_with_memories(user_input)
         
-        # Save user message
+        # Save user message to database
         self._save_conversation_turn('user', user_input)
         
         # Add user message to context
@@ -156,7 +180,7 @@ class AgentRuntime:
             
             # Check if we need to process tool calls
             if message.tool_calls:
-                # Add assistant message with tool calls
+                # Add assistant message with tool calls to context
                 self.session.context.append({
                     'role': 'assistant',
                     'content': message.content,
@@ -191,7 +215,7 @@ class AgentRuntime:
             self.session.add_message('assistant', message.content or '')
             final_response = message.content or ''
             
-            # Save assistant response
+            # Save assistant response to database and trigger extraction
             if final_response:
                 self._save_conversation_turn('assistant', final_response)
                 self._extract_and_store_memories()
@@ -205,33 +229,53 @@ class AgentRuntime:
         return f'Reached maximum iterations ({max_iterations}) without completing. Last context length: {len(self.session.context)} messages.'
     
     def _save_conversation_turn(self, role: str, content: str):
-        """Save conversation turn to database."""
+        """
+        Save conversation turn to database
+        
+        Args:
+            role: Message role
+            content: Message content
+        """
         if self.db:
             self.db.save_message(self.session.id, role, content)
     
     def _augment_context_with_memories(self, user_input: str):
-        """Add relevant memories to context."""
+        """
+        Add relevant memories to context
+        
+        Args:
+            user_input: User's input message
+        """
         if not self.db:
             return
         
+        # Search for relevant memories
         memories = self.session.get_relevant_memories(user_input, limit=self.config.memory_max_context)
         
         if memories:
+            # Format memories as context
             memory_text = "\n\nRelevant previous knowledge from past conversations:\n"
             for mem in memories:
                 mem_type = mem['memory_type']
                 text = mem['content'].get('text', '')
                 memory_text += f"- [{mem_type.upper()}] {text}\n"
             
+            # Add to context as system message (only if not already added)
             if not any(m.get('role') == 'system' and 'Relevant previous knowledge' in m.get('content', '') for m in self.session.context[-5:]):
                 self.session.add_message('system', memory_text)
     
     def _extract_and_store_memories(self):
-        """Extract memories from conversation and store."""
+        """
+        Extract memories from conversation and store
+        
+        Runs synchronously after agent response.
+        Logs only when APRIL_LOG_LEVEL is DEBUG or lower.
+        """
         if not self.db or not self.extractor or not self.session.id:
             return
         
         try:
+            # Get unprocessed messages for this session
             messages = self.db.get_unprocessed_messages(self.session.id)
             
             if not messages:
@@ -243,6 +287,7 @@ class AgentRuntime:
             
             self._event_bus.emit(LogEvent(level="DEBUG", source="memory", message=f"Extracted {len(memories)} memories"))
             
+            # Store memories
             for memory in memories:
                 self.db.save_memory(
                     session_id=self.session.id,
@@ -253,6 +298,7 @@ class AgentRuntime:
                     source_message_ids=[m['id'] for m in messages]
                 )
             
+            # Mark messages as processed
             message_ids = [m['id'] for m in messages]
             self.db.mark_processed(message_ids)
             
@@ -262,7 +308,15 @@ class AgentRuntime:
             self._emit_error("memory_extraction", str(e))
     
     def run_conversation(self, user_messages: List[str]) -> str:
-        """Run multiple messages through the agent."""
+        """
+        Run multiple messages through the agent
+        
+        Args:
+            user_messages: List of user messages
+            
+        Returns:
+            Final response after all messages
+        """
         response = ''
         for msg in user_messages:
             response = self.run(msg)
@@ -274,7 +328,12 @@ class AgentRuntime:
         self._event_bus.emit(LogEvent(level="INFO", source="session", message="Context cleared"))
     
     def get_context_summary(self) -> Dict:
-        """Get summary of current context."""
+        """
+        Get summary of current context
+        
+        Returns:
+            Dictionary with context stats
+        """
         return {
             'session_id': self.session.id,
             'message_count': len(self.session.context),
