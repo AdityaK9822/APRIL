@@ -1,19 +1,27 @@
-"""Core APRIL Agent Runtime"""
+# APRIL Core Module - Initialization
+"""
+Core modules for APRIL
+"""
 
+from .textual_tui import APRILApp, get_agent, main
 from .config import AgentConfig
 from .agent import AgentRuntime
-from .session import Session, SessionManager
+from .backend_logger import BackendLoggerBridge
 from .database import MemoryDatabase
-from .memory_extractor import MemoryExtractor
-from .tui import APRIL_TUI, ConsoleRenderer
+from .logger import APRILLogger, get_logger
+from .events import EventBus, get_event_bus, reset_event_bus
 
 __all__ = [
-    'AgentConfig', 
-    'AgentRuntime', 
-    'Session', 
-    'SessionManager',
+    'APRILApp', 
+    'get_agent', 
+    'main',
+    'AgentConfig',
+    'AgentRuntime',
+    'BackendLoggerBridge',
     'MemoryDatabase',
-    'MemoryExtractor',
-    'APRIL_TUI',
-    'ConsoleRenderer'
+    'APRILLogger',
+    'get_logger',
+    'EventBus',
+    'get_event_bus',
+    'reset_event_bus'
 ]
