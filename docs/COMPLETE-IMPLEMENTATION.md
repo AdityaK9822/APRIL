@@ -132,7 +132,7 @@ Display in TUI
 │ ┌──────────────────────────────────────┐   │
 │ │ [👤] What files are in this          │   │
 │ │      directory?                      │   │
-│ │                                      │   │
+│ │                                      │
 │ │ [🤖] The directory contains:         │   │
 │ │      - main.py                       │   │
 │ │      - cli/                          │   │
@@ -289,7 +289,7 @@ python main.py --no-agent
 
 ```python
 [TOOL] Calling: shell
-[TOOL] Args: {'command': 'ls -la'}
+[TOOL] TOOL Args: {'command': 'ls -la'}
 [TOOL] Result: total 48 drwxr-xr-x...
 ```
 
@@ -314,6 +314,7 @@ python main.py --no-agent
 - main.py
 - cli/
 - core/
+}
 ```
 
 ---
@@ -356,6 +357,7 @@ Qwen3 Coder will use this architecture to:
 1. **Read from AgentRuntime**
    - Access session context
    - Read memory database
+   - Read tool executions
    - Monitor tool executions
 
 2. **Write Code to Database**
@@ -371,9 +373,6 @@ Qwen3 Coder will use this architecture to:
 4. **Log Code Generation Events**
    ```python
    [CODING] Request: Write Python function
-   [CODING] Language: Python
-   [CODING] Generated: 42 lines
-   [CODING] Stored: data/codes/fn_001.py
    ```
 
 ---
@@ -425,4 +424,4 @@ Qwen3 Coder will use this architecture to:
 - Log panel in TUI is configurable via `--show-logs` or `APRIL_TUI_SHOW_LOGS` env var
 - Backend logs are written to file only (no console output for logs)
 - The `cli/main.py` is kept for backward compatibility but marked as deprecated
-- `logging.py` renamed to `logger.py` to avoid conflict with Python's stdlib module
+- `logging.py` renamed to `logger.py` to avoid olarak as Python's stdlib module
