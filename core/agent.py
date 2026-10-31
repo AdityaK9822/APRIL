@@ -717,6 +717,278 @@ if __name__ == '__main__':
     checks.append(f"end-to-end run_task dry: ledgers R=4k/P=3k, {len(marks)} markers")
     shutil.rmtree(tmp, ignore_errors=True)
 
+    # 6. P1: the zcode substrate — surface facts, authored mini-tasks and the gate matrix.
+    from core.harness import prompts as harness_prompts
+    from core.harness.zcode_adapter import ZcodeAdapter
+    from core.substrate.zcode import (
+        ZCODE_HOOK_EVENTS,
+        ZCODE_SURFACE as zsurface,
+        memory_root_for,
+    )
+    import copy as _copy
+
+    assert ZCODE_HOOK_EVENTS == frozenset(
+        {
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PermissionRequest",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "Stop",
+        }
+    ), ZCODE_HOOK_EVENTS
+    assert zsurface.always_on == ("AGENTS.md",) and zsurface.hooks_file == ".zcode/config.json"
+    assert zsurface.hooks_shape == "nested" and set(zsurface.hook_types) == {"command", "process"}
+    assert zsurface.subagent_path == ".zcode/agents/{name}.md"
+    assert zsurface.plugin_manifest == ".zcode/plugins/{name}/.zcode-plugin/plugin.json"
+    assert zsurface.memory_file == "MEMORY.md" and zsurface.memory_max == 40_000
+    zst = harness_prompts._st(zsurface)  # noqa: SLF001 — the registry is the check
+    assert zst.surface_md.strip() and zst.tts_surface.strip()
+    checks.append("zcode surface facts + prompt surface registered")
+
+    zadapter = ZcodeAdapter()
+    ztasks = zadapter.tasks()
+    assert ztasks == [
+        "device-control/read-write",
+        "mcp/wiring",
+        "network/capability-doc",
+    ], ztasks
+    assert len({zadapter.domain_of(t) for t in ztasks}) == len(ztasks)
+    for t in ztasks:
+        zps = zadapter.prompts_for(t)  # HarnessPrompts constructor enforces the slot rules
+        assert zps.work.strip() and zps.inv_levers.strip() and zps.yardstick.strip()
+        ztd = zadapter._task(t)  # noqa: SLF001 — the forced-deliverable contract needs it
+        assert ztd.deliverable.startswith("deliverables/") and "/" not in ztd.deliverable[13:], (
+            ztd.deliverable
+        )
+        for fname, _content in ztd.fixtures:
+            assert not fname.startswith("deliverables/"), (t, fname)
+    assert zadapter.score("irrelevant-run-dir", ztasks[0]) is None
+    checks.append(f"authored mini-tasks: {len(ztasks)} tasks, forced deliverables, no grader vocabulary")
+
+    # The gate matrix: one representative failure per P1-1.3 family (every family's
+    # full variant list is proven in the design notes; these are the load-bearing ones).
+    zg_ok = {
+        "AGENTS.md": (
+            "# APRIL (zcode)\n\nWhen the relay needs pairing, use the `relay-pair` "
+            "skill: pair a Tasmota relay to the local MQTT broker.\n"
+        ),
+        ".agents/skills/relay-pair/SKILL.md": (
+            "---\nname: relay-pair\n"
+            "description: Pair a Tasmota relay to the local MQTT broker.\n---\nbody\n"
+        ),
+        ".zcode/agents/census-reader.md": (
+            "---\ndescription: reads device census files\n---\nbody\n"
+        ),
+        ".zcode/config.json": json.dumps(
+            {
+                "hooks": {
+                    "enabled": True,
+                    "events": {
+                        "PreToolUse": [
+                            {"hooks": [{"type": "command", "command": "echo", "args": ["x"]}]}
+                        ]
+                    },
+                }
+            }
+        ),
+        ".zcode/plugins/relay-audit/.zcode-plugin/plugin.json": json.dumps(
+            {"name": "relay-audit", "version": "0.1.0", "description": "Audit relay changes."}
+        ),
+        "scripts/spot_check.py": "print('ok')\n",
+        "MEMORY.md": "# seed\n\nrelay broker mqtt.local\n",
+    }
+    ztree_ok = dict(zg_ok)
+    harness_tree.validate(zsurface, ztree_ok, allow_subagents=True)
+
+    def zmod(**over: str) -> dict[str, str]:
+        bad = dict(zg_ok)
+        bad.update(over)
+        return bad
+
+    zgates = [
+        (
+            "skill name mismatch",
+            zmod(
+                **{
+                    ".agents/skills/relay-pair/SKILL.md": (
+                        "---\nname: other\ndescription: x\n---\nbody\n"
+                    )
+                }
+            ),
+            "matching its directory",
+        ),
+        (
+            "hooks not enabled",
+            zmod(
+                **{
+                    ".zcode/config.json": json.dumps(
+                        {
+                            "hooks": {
+                                "enabled": False,
+                                "events": {
+                                    "Stop": [
+                                        {"hooks": [{"type": "command", "command": "x"}]}
+                                    ]
+                                },
+                            }
+                        }
+                    )
+                }
+            ),
+            '"enabled": true',
+        ),
+        (
+            "hooks wrong type",
+            zmod(
+                **{
+                    ".zcode/config.json": json.dumps(
+                        {
+                            "hooks": {
+                                "enabled": True,
+                                "events": {
+                                    "Stop": [
+                                        {"hooks": [{"type": "shell", "command": "x"}]}
+                                    ]
+                                },
+                            }
+                        }
+                    )
+                }
+            ),
+            "type must be one of command, process",
+        ),
+        (
+            "hooks unknown event",
+            zmod(
+                **{
+                    ".zcode/config.json": json.dumps(
+                        {
+                            "hooks": {
+                                "enabled": True,
+                                "events": {
+                                    "PrePrompt": [
+                                        {"hooks": [{"type": "command", "command": "x"}]}
+                                    ]
+                                },
+                            }
+                        }
+                    )
+                }
+            ),
+            "unknown event 'PrePrompt'",
+        ),
+        (
+            "plugin orphan content",
+            {
+                **{k: v for k, v in zg_ok.items() if not k.startswith(".zcode/plugins/")},
+                ".zcode/plugins/relay-audit/tool.md": "no manifest loads none",
+            },
+            "has no manifest",
+        ),
+        (
+            "script syntax",
+            zmod(**{"scripts/spot_check.py": "def ( break\n"}),
+            "does not compile",
+        ),
+        (
+            "always-on over cap",
+            zmod(**{"AGENTS.md": "x" * (zsurface.always_on_max + 1)}),
+            "over the 60000 cap",
+        ),
+        (
+            "memory over cap",
+            zmod(**{"MEMORY.md": "y" * (zsurface.memory_max + 1)}),
+            "over the 40000 cap",
+        ),
+    ]
+    for label, bad_tree, needle in zgates:
+        try:
+            harness_tree.validate(zsurface, bad_tree, allow_subagents=True)
+            raise AssertionError(f"zcode gate {label!r} passed but must fail")
+        except ValueError as exc:
+            assert needle in str(exc), (label, str(exc))
+    checks.append(f"zcode gate matrix: {len(zgates)} representatives fail as designed")
+
+    # 7. P1 rollout through the process-boundary stub, with a memory-bearing harness.
+    old_zbin = os.environ.get("APRIL_ZCODE_BIN")
+    old_zroot = os.environ.get("APRIL_RUNS_ROOT")
+    zstub = (Path.cwd() / "core/harness/zcode_cli_stub.py").resolve()
+    ztmp = Path(tempfile.mkdtemp(prefix="april-zcode-checks-"))
+    os.environ.update({"APRIL_ZCODE_BIN": str(zstub), "APRIL_RUNS_ROOT": str(ztmp / "runs")})
+    try:
+        ztree = _copy.deepcopy(zg_ok)
+        ztree[".agents/skills/relay-pair/scripts/pair_check.py"] = "print('pair-check')\n"
+        ztree[".zcode/plugins/relay-audit/README.md"] = "audit notes\n"
+        zhdir = harness_tree.write_tree(zsurface, ztree, ztmp / "harnesses" / "zc-gate")
+        zadapter.validate_tree(harness_tree.read_tree(zsurface, zhdir))
+        zrd = zadapter.execute("device-control/read-write", zhdir, "zcheck/roll1")
+        assert zadapter.delivered(zrd), "zcode stub rollout must deliver"
+        assert "Device Write Plan" in zadapter.deliverable_text(zrd)
+        zws = Path(zrd) / "workspace"
+        assert (zws / "AGENTS.md").is_file() and (zws / "input/devices.json").is_file()
+        zmem = memory_root_for(zws, Path(zrd) / "zcode_home")
+        assert (zmem / "MEMORY.md").read_text() == ztree["MEMORY.md"], zmem
+        ztraj = (Path(zrd) / "trajectory.txt").read_text()
+        assert f"memory seed: staged at {zmem.relative_to(Path(zrd))}" in ztraj, ztraj[:400]
+        assert "harness: 9 file(s) on the surface" in ztraj, ztraj[:400]
+        checks.append(f"zcode stub rollout + memory seed: {Path(zrd).relative_to(ztmp)}")
+
+        # 8. P1 end to end: run_task on the zcode adapter, offline, ledger identity exact.
+        zres = asyncio.run(
+            Harness(zadapter, runs_root=ztmp / "runs").run_task(
+                "device-control/read-write", k=1
+            )
+        )
+        assert zres.status == "ok", (zres.status, zres.errors)
+        for zmode, zrec in zres.modes.items():
+            zled = zrec["ledger"]
+            assert zled["R"] == zled["expected_R"] == 4, (zmode, zled)
+            assert zled["P"] == zled["expected_P"] == 3, (zmode, zled)
+            assert zled["rollouts"] == [
+                "base1",
+                "inv1",
+                "dom1",
+                ("agg1" if zmode == "agg" else "c1"),
+            ], (zmode, zled["rollouts"])
+            assert zrec["finals"] and zrec["ok"], (zmode, zrec["finals"], zrec["errors"])
+        zmarks = list((ztmp / "runs").rglob(".adapt_complete"))
+        assert len(zmarks) == 6, len(zmarks)
+        for zm in zmarks:
+            assert zadapter.delivered(zm.parent), zm
+            zp = json.loads(zm.read_text())
+            assert zp["harness"] not in ("absent", "", "base"), zp
+            assert zp["version"] == 1, zp
+        checks.append(
+            f"zcode run_task offline: ledgers R=4k/P=3k, {len(zmarks)} markers, deliverables hold"
+        )
+    finally:
+        if old_zbin is None:
+            os.environ.pop("APRIL_ZCODE_BIN", None)
+        else:
+            os.environ["APRIL_ZCODE_BIN"] = old_zbin
+        if old_zroot is None:
+            os.environ.pop("APRIL_RUNS_ROOT", None)
+        else:
+            os.environ["APRIL_RUNS_ROOT"] = old_zroot
+        shutil.rmtree(ztmp, ignore_errors=True)
+
+    # 9. The process-boundary invariant: the ZCode checkout is never touched.
+    zcode_repo = Path.cwd() / "ZCode"
+    if zcode_repo.is_dir():
+        import subprocess as _sp
+
+        porcelain = _sp.run(
+            ["git", "-C", str(zcode_repo), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert porcelain.returncode == 0, porcelain
+        assert porcelain.stdout.strip() == "", porcelain.stdout
+        checks.append("ZCode checkout byte-for-byte untouched (porcelain empty)")
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")

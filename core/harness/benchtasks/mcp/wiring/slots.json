@@ -1,0 +1,10 @@
+{
+  "work": "Improve APRIL's embodied harness so MCP integrations are wired honestly: each server gets a transport that matches its catalog entry, a tool list limited to what the workspace needs, and a stated authority boundary plus failure behavior before any tool call is attempted.",
+  "inv_levers": "On a first success: a reusable .agents/skills/<name>/SKILL.md 'wire an MCP server' procedure (catalog read, transport match, boundary statement) so future jobs start from a stated method. If trajectories show wiring drafted wholesale: a scripts/<name>.py helper (snake_case) that loads input/mcp_catalog.json and renders the wiring skeleton deterministically. A .zcode/agents/<name>.md 'WireReview' subagent is worth it when trajectories show boundaries stated without checking the catalog's own risk fields: a large catalog read yields one short verdict.",
+  "dom_levers": "Transports are not interchangeable: stdio servers start per-session from a command on the local machine, HTTP servers are reachable at a URL and must honor their auth scope. Guidance that confuses startup modes costs the run. Boundaries are data from the catalog, not inventions; where the catalog is silent, say so rather than assume.",
+  "yardstick": "Every wired server matches its catalog transport, tools, and boundary exactly as the catalog declares them; no invented tool names, no invented auth.",
+  "domain_word": "networked",
+  "domain_guidance": "Network tools are scoped by the authority the catalog declares; a tool reachable is not a tool permitted. Binding a tool the entry does not declare is a boundary break.",
+  "deliverable": "deliverables/mcp-wiring.json",
+  "fixtures": ["mcp_catalog.json"]
+}

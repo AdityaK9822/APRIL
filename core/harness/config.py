@@ -19,3 +19,8 @@ BUN = os.environ.get("APRIL_BUN", "bun")
 # A pinned OpenCode checkout mounted here enables the opencode channel; empty
 # leaves the channel off, and every call fails as a ProposerError.
 OPENCODE_DIR = os.environ.get("APRIL_OPENCODE_DIR", "")
+# The zcode substrate's CLI binary: an absolute path to the SEA build or a name
+# on PATH. Read at SPAWN time by the zcode adapter (APRIL_ZCODE_BIN override,
+# this value as the fallback) so offline self-checks can point each invocation
+# at the process-boundary stub without a config reload.
+ZCODE_BIN = os.environ.get("APRIL_ZCODE_BIN", "zcode")

@@ -1,0 +1,10 @@
+{
+  "work": "Improve APRIL's embodied harness so device control work over the local network completes reliably: read the device state first, plan the smallest reversible write, and name the observation that confirms the change took hold.",
+  "inv_levers": "On a first success: turn the read-evaluate-observe loop into a reusable skill (.agents/skills/<name>/SKILL.md) so the next device job starts from a stated method. If trajectories show hand-rolled device access that failed: a scripts/<name>.py helper (snake_case) that reads input/devices.json and emits state lines deterministically. A .zcode/agents/<name>.md 'DeviceGuard' reviewer is worth it when trajectories show write plans drafted without checking device risk levels: a large fleet read produces one short verdict.",
+  "dom_levers": "Device capabilities differ in kind: read-only sensors cannot confirm a write, relays can. Guidance that treats a camera like a pump costs the run. Risk ladder belongs in always-on AGENTS.md only if every run of the workspace needs it; otherwise state it inside a skill. MCP wiring language belongs on the mcp tasks, not here.",
+  "yardstick": "The plan cites concrete device fields from input/devices.json for every proposed transition, never unconditional actuation, and every write names its verifying observation.",
+  "domain_word": "device-control",
+  "domain_guidance": "Devices reachable over the network have each a declared risk: the higher the risk the more the write is checked before the machine moves. An actuation not verified through the device's own state must be reported as unverified.",
+  "deliverable": "deliverables/device-write-plan.md",
+  "fixtures": ["devices.json"]
+}

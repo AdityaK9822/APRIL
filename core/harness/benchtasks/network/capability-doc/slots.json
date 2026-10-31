@@ -1,0 +1,10 @@
+{
+  "work": "Improve APRIL's embodied harness so environment documentation is written from evidence: every capability claim traces to the workspace inventory input, out-of-bounds state is stated as data the inventory carries, and reliability notes name the transport each foot depends on.",
+  "inv_levers": "On a first success: a reusable .agents/skills/<name>/SKILL.md 'write a capability doc' procedure (inventory read, per-limb sections, boundary statement) so the next environment starts documented. If trajectories show the doc assembled by hand and inconsistent across limbs: a scripts/<name>.py helper (snake_case) that extracts per-host facts into the skeleton. A .zcode/agents/<name>.md 'DocAudit' subagent is worth it when trajectories show claims untraceable to the inventory: a large inventory read yields one short list of unsupported lines.",
+  "dom_levers": "Sensing, acting and omission are different sections: a camera that can look is not a light that can be switched; an unmanaged network boundary is out-of-bounds by declaration. Where the inventory is silent, the doc says so in place rather than inventing a capability.",
+  "yardstick": "Every claim names its inventory line as evidence; nothing is asserted as capability without the inventory stating it.",
+  "domain_word": "networked",
+  "domain_guidance": "The inventory is the authority; the environment is what it says is reachable. Documentation that assumes a limb exists that inventory does not list is fabricated environment.",
+  "deliverable": "deliverables/capability.md",
+  "fixtures": ["environment.txt"]
+}

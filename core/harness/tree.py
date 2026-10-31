@@ -53,6 +53,16 @@ class SurfaceSpec:
     subagent_requires_mode: bool
     plugin_dir: str | None
     hooks_file: str | None
+    # Per-surface layouts. A None falls back to the legacy shared layout, so existing
+    # surfaces construct unchanged.
+    subagent_path: str | None = None  # "{name}" template; None = sub_agents/<name>/AGENT.md
+    plugin_manifest: str | None = None  # "{name}" template; None = <plugin_dir>/<name>.ts
+    memory_file: str | None = None  # the c3 seed file, staged into the runtime's own store
+    memory_max: int | None = None  # per-file cap for memory_file
+    # Hooks schema: "flat" reads {"hooks": {"<Event>": [...]}}, "nested" reads the
+    # runtime's {"hooks": {"enabled": true, "events": {"<Event>": [...]}}}.
+    hooks_shape: str = "flat"
+    hook_types: tuple[str, ...] = ("command",)
     hook_events: frozenset[str] = frozenset()
     compile_skill_scripts: bool = False
     reject_empty_always_on: bool = False
@@ -60,23 +70,71 @@ class SurfaceSpec:
     stubs: tuple[tuple[str, str], ...] = ()
 
 
+def _template_rx(template: str) -> str:
+    """Regex body for a path template whose {name} slot is the one capture group."""
+    return re.escape(template).replace(re.escape("{name}"), f"({_NAME})")
+
+
+def _template_prefix(template: str) -> str:
+    """The literal part of a {name} template before the name slot."""
+    i = template.index("{name}")
+    return template[:i]
+
+
 @lru_cache(maxsize=8)
-def _res(surface_name: str, skill_dir: str, plugin_dir: str | None) -> dict[str, re.Pattern]:
+def _res(
+    surface_name: str,
+    skill_dir: str,
+    plugin_dir: str | None,
+    subagent_path: str | None,
+    plugin_manifest: str | None,
+) -> dict[str, re.Pattern]:
     sd = re.escape(skill_dir)
     out = {
         "skill": re.compile(rf"{sd}/({_NAME})/SKILL\.md"),
         "skill_script": re.compile(rf"{sd}/{_NAME}/scripts/[A-Za-z0-9_.\-]+"),
-        "subagent": re.compile(rf"sub_agents/({_NAME})/AGENT\.md"),
+        # Legacy dir layout unless the surface overrides it with a {name} template.
+        "subagent": re.compile(
+            rf"{re.escape('sub_agents')}/({_NAME})/{re.escape('AGENT')}\.md"
+            if subagent_path is None
+            else _template_rx(subagent_path)
+        ),
         "script": re.compile(r"scripts/[a-z0-9_][a-z0-9_]*\.py"),
         "script_ref": re.compile(rf"(?:python3?\s+)((?:{sd}/[\w\-]+/)?scripts/[\w.\-]+\.py)"),
     }
-    if plugin_dir is not None:
+    if plugin_dir is None:
+        pass
+    elif plugin_manifest is None:
         out["plugin"] = re.compile(rf"{re.escape(plugin_dir)}/({_NAME})\.ts")
+    else:
+        out["plugin"] = re.compile(_template_rx(plugin_manifest))
+        prefix = re.escape(_template_prefix(plugin_manifest).rstrip("/"))
+        out["plugin_tree"] = re.compile(rf"{prefix}/({_NAME})/.+")
     return out
 
 
 def _rx(surface: SurfaceSpec) -> dict[str, re.Pattern]:
-    return _res(surface.name, surface.skill_dir, surface.plugin_dir)
+    return _res(
+        surface.name,
+        surface.skill_dir,
+        surface.plugin_dir,
+        surface.subagent_path,
+        surface.plugin_manifest,
+    )
+
+
+def subagent_file(surface: SurfaceSpec, name: str) -> str:
+    """The rel path of one sub-agent's file, per this surface's layout."""
+    if surface.subagent_path is None:
+        return f"sub_agents/{name}/AGENT.md"
+    return surface.subagent_path.replace("{name}", name)
+
+
+def plugin_manifest_file(surface: SurfaceSpec, name: str) -> str | None:
+    """The rel path of one plugin's manifest, per this surface's layout (legacy = None)."""
+    if surface.plugin_dir is None or surface.plugin_manifest is None:
+        return None
+    return surface.plugin_manifest.replace("{name}", name)
 
 
 def normalize_rel(rel: str) -> str:
@@ -99,6 +157,8 @@ def is_allowed(surface: SurfaceSpec, rel: str) -> bool:
         return True
     if surface.hooks_file is not None and rel == surface.hooks_file:
         return True
+    if surface.memory_file is not None and rel == surface.memory_file:
+        return True
     r = _rx(surface)
     if (
         r["skill"].fullmatch(rel)
@@ -106,6 +166,8 @@ def is_allowed(surface: SurfaceSpec, rel: str) -> bool:
         or r["subagent"].fullmatch(rel)
         or r["script"].fullmatch(rel)
     ):
+        return True
+    if "plugin_tree" in r and r["plugin_tree"].fullmatch(rel):
         return True
     return "plugin" in r and bool(r["plugin"].fullmatch(rel))
 
@@ -216,6 +278,10 @@ def autotrigger(surface: SurfaceSpec, tree: Tree, *, always_on_max: int | None =
 def check_hooks(surface: SurfaceSpec, src: str, errs: list[str]) -> None:
     """Validate the hooks file against the schema the framework dispatches; a malformed one
     never fires rather than erroring, so the shape is enforced where the proposer sees it.
+
+    "flat" surfaces read the hooks file as just hooks: `{"hooks": {"<Event>": [...]}}`.
+    "nested" surfaces read a whole run-config file whose hooks live under
+    `hooks.enabled` + `hooks.events`; other blocks in the file are not ours to check.
     """
     hf = surface.hooks_file
     try:
@@ -224,10 +290,33 @@ def check_hooks(surface: SurfaceSpec, src: str, errs: list[str]) -> None:
         errs.append(f"{hf} is not valid JSON: {exc}")
         return
     hooks = doc.get("hooks") if isinstance(doc, dict) else None
-    if not isinstance(hooks, dict) or not hooks:
-        errs.append(f'{hf} needs a top-level {{"hooks": {{"<Event>": [...]}}}} object')
-        return
-    for event, entries in hooks.items():
+    if surface.hooks_shape == "nested":
+        if not isinstance(hooks, dict) or not hooks:
+            return  # a run config without a hooks block declares no hooks
+        if not hooks.get("enabled"):
+            errs.append(
+                f'{hf}: hooks are declared with the feature off; "enabled": true is '
+                f"required for any event to fire"
+            )
+            return
+        events_map = hooks.get("events")
+        if not isinstance(events_map, dict) or not events_map:
+            errs.append(
+                f'{hf}: hooks are enabled with no "events" mapping; give '
+                f'{{"<Event>": [ ... ]}} entries under hooks.events'
+            )
+            return
+    else:
+        if "events" in (hooks or {}) and isinstance(hooks.get("events"), dict):
+            # Tolerate the nested shape written into a flat hooks file.
+            events_map = hooks["events"]
+        else:
+            events_map = hooks
+        if not isinstance(events_map, dict) or not events_map:
+            errs.append(f'{hf} needs a top-level {{"hooks": {{"<Event>": [...]}}}} object')
+            return
+    allowed = sorted(surface.hook_types)
+    for event, entries in events_map.items():
         if event not in surface.hook_events:
             errs.append(
                 f"{hf}: unknown event {event!r}; the framework dispatches "
@@ -242,13 +331,24 @@ def check_hooks(surface: SurfaceSpec, src: str, errs: list[str]) -> None:
                 errs.append(f"{hf}: {event}[{i}] needs a `hooks` list")
                 continue
             for h in entry["hooks"]:
-                if not isinstance(h, dict) or h.get("type") != "command":
+                if not isinstance(h, dict) or h.get("type") not in surface.hook_types:
                     errs.append(
-                        f'{hf}: {event}[{i}] hook type must be "command" — '
-                        f"async/prompt/agent hooks are skipped as 'not supported yet'"
+                        f'{hf}: {event}[{i}] hook type must be one of {", ".join(allowed)} — '
+                        f"other hook forms are skipped as 'not supported yet'"
                     )
                 elif not str(h.get("command", "")).strip():
                     errs.append(f"{hf}: {event}[{i}] has an empty `command`")
+                else:
+                    args_ = h.get("args")
+                    if args_ is not None and (
+                        not isinstance(args_, list)
+                        or any(not isinstance(a, str) for a in args_)
+                    ):
+                        errs.append(f"{hf}: {event}[{i}] `args` must be a list of strings")
+                    if h.get("timeoutMs") is not None and not isinstance(
+                        h.get("timeoutMs"), (int, float)
+                    ):
+                        errs.append(f"{hf}: {event}[{i}] `timeoutMs` must be a number")
 
 
 def _py_compiles(rel: str, src: str, errs: list[str]) -> None:
@@ -306,11 +406,14 @@ def _check_subagents(
     if subs and not allow_subagents:
         errs.append(f"sub_agents are not available on this deployment: {subs}")
     for name in subs:
-        fm = tree[f"sub_agents/{name}/AGENT.md"][:600]
+        fm = tree[subagent_file(surface, name)][:600]
         if surface.subagent_requires_mode and not re.search(r"^mode:\s*subagent\s*$", fm, re.M):
             errs.append(f"sub_agents/{name}/AGENT.md needs frontmatter `mode: subagent`")
         if not re.search(r"^description:\s*\S", fm, re.M):
-            errs.append(f"sub_agents/{name}/AGENT.md needs a `description:`")
+            errs.append(
+                f"{subagent_file(surface, name)} needs frontmatter `description:` (a "
+                f"3-5 word short description), or the agent is dropped SILENTLY at load"
+            )
     return subs
 
 
@@ -331,6 +434,62 @@ def _check_script_refs(
                 continue
             if ref not in have:
                 errs.append(f"{rel} invokes `{ref}` but that file is not in the harness")
+
+
+def _check_memory(surface: SurfaceSpec, tree: Tree, errs: list[str]) -> None:
+    """The c3 seed file: content-capped when the surface says so, never required
+    (absent = the runtime starts with an empty memory store)."""
+    if surface.memory_file is None or surface.memory_file not in tree:
+        return
+    n = len(tree[surface.memory_file])
+    if surface.memory_max is not None and n > surface.memory_max:
+        errs.append(
+            f"{surface.memory_file} is {n} chars, over the {surface.memory_max} cap — "
+            f"memory text rides into context on every turn of every run"
+        )
+
+
+def _check_plugins(surface: SurfaceSpec, tree: Tree, errs: list[str]) -> int:
+    """Manifest-layout plugins: required manifest fields, name must equal the directory,
+    and plugin content without a manifest loads nowhere. Returns the plugin count."""
+    if surface.plugin_manifest is None:
+        return 0
+    r = _rx(surface)
+    names: set[str] = set()
+    for rel in sorted(tree):
+        m = r["plugin"].fullmatch(rel)
+        if not m:
+            continue
+        name = m.group(1)
+        names.add(name)
+        try:
+            doc = json.loads(tree[rel])
+        except json.JSONDecodeError as exc:
+            errs.append(f"{rel} is not valid JSON: {exc}")
+            continue
+        if not isinstance(doc, dict):
+            errs.append(f"{rel} must be a manifest object")
+            continue
+        missing = [
+            f for f in ("name", "version", "description") if not str(doc.get(f, "")).strip()
+        ]
+        if missing:
+            errs.append(
+                f"{rel} manifest missing required field(s): {', '.join(missing)}"
+            )
+        elif doc.get("name") != name:
+            errs.append(
+                f"{rel} manifest field `name` is {doc.get('name')!r} but the plugin "
+                f"directory is {name!r} — a mismatch is dropped SILENTLY at load"
+            )
+    for rel in sorted(tree):
+        m = r["plugin_tree"].fullmatch(rel)
+        if m and m.group(1) not in names:
+            errs.append(
+                f"{rel} is content of plugin {m.group(1)!r}, which has no manifest, "
+                f"so nothing loads it"
+            )
+    return len(names)
 
 
 def validate(
@@ -373,6 +532,8 @@ def validate(
         check_hooks(surface, tree[surface.hooks_file], errs)
 
     _check_script_refs(surface, tree, r, reserved_scripts, errs)
+    _check_memory(surface, tree, errs)
+    n_plugins = _check_plugins(surface, tree, errs)
 
     if errs:
         raise ValueError(" | ".join(errs))
@@ -384,9 +545,15 @@ def validate(
         "scripts": sum(1 for rel in tree if r["script"].fullmatch(rel)),
     }
     if surface.plugin_dir is not None:
-        out["plugins"] = sum(1 for rel in tree if r["plugin"].fullmatch(rel))
+        out["plugins"] = (
+            n_plugins
+            if surface.plugin_manifest is not None
+            else sum(1 for rel in tree if r["plugin"].fullmatch(rel))
+        )
     if surface.hooks_file is not None:
         out["hooks"] = 1 if surface.hooks_file in tree else 0
+    if surface.memory_file is not None:
+        out["memory"] = 1 if surface.memory_file in tree else 0
     return out
 
 

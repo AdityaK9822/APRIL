@@ -1,0 +1,31 @@
+# Environment inventory — lab-segment workspace (snapshot, authorized bounds)
+
+Pairing snapshot taken 2026-10-30 from the APRIL control machine (this workspace).
+
+## Services on the control machine
+
+- `telemetry-svc` — HTTP on 127.0.0.1:8765; streams lab sensor JSON; fresh data every 5 s.
+- `esp-telemetry-daemon` — subscribes ESPNOW feeds, persists to data/spool.db; up.
+- `planner-worker` — local job runner on 127.0.0.1:9020; runs claim tickets; no network egress.
+- `camera-frame-srv` — on demand; `GET /frame?source=lab-camera` proxies rtsp to jpeg; requires lab-camera stream up.
+
+## Network limbs (lab-segment segment, authorized)
+
+- `192.0.2.10 lab-broker` — home broker + home-automation instance; ssh key strong; owns relay/airq topics.
+- `192.0.2.61 lab-relay` — tasmota-style relay HTTP (`/cm`); confirms own state; reversible.
+- `192.0.2.74 lab-camera` — rtsp main stream; sensing only; drops ~1 frame/s under load.
+- `192.0.2.77 lab-cnc` — CNC GRBL over HTTP bridge; **risky: moving parts**; reversible via program stop.
+- `192.0.2.82 lab-router` — network control plane; **no-touch per lab policy**.
+- `192.0.2.24 lab-ecg` — serial over USB to control machine (`lab-serial0`); stream only; no config path documented.
+
+## Out of bounds (inventory-stated)
+
+- `lab-router` — no-touch per lab policy (wording as stated).
+- Anything off lab-segment — segment authorization ends at 192.0.2.0/24.
+- `lab-broker` cloud bridge — disabled in the snapshot; not part of this environment.
+
+## Not stated by inventory (as written)
+
+- Ownership and recovery path for the CNC bridge is silent.
+- lab-ecg lead-off semantics under movement are not documented in the snapshot.
+- airq-3 calibration freshness is not recorded.

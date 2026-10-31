@@ -752,6 +752,152 @@ class _SurfaceText:
     tts_surface: str
 
 
+_TTS_SURFACE_HEAD_ZCODE = """\
+# EDITABLE HARNESS SURFACE
+
+You may write ONLY these paths. Anything else is off the editable surface: it is dropped before
+your work is used, however good it is.
+
+| path | component | when it is in context |
+|---|---|---|
+| `AGENTS.md` | c1 persona/procedure, c2 standing rules, c4 tool prose -- all ride the one instruction file | ALWAYS ON: zcode merges `~/.zcode/AGENTS.md` (user, not editable) then the project `AGENTS.md` (yours) |
+| `.agents/skills/<name>/SKILL.md` | c6 reusable workflow | name+description advertised; the BODY is read ON DEMAND |
+| `.agents/skills/<name>/scripts/*` | c7 helper carried with its skill | run via the Bash tool |
+| `.zcode/agents/<name>.md` | c5 delegated agent role | dispatched ON DEMAND by the `Agent` tool, runs in its OWN context, returns text |
+| `.zcode/plugins/<name>/.zcode-plugin/plugin.json` | c8 local plugin | loads ONLY with its manifest AND run-config enablement |
+| `scripts/<name>.py` | c7 deterministic helper | run ON DEMAND via the Bash tool |
+| `MEMORY.md` | c3 memory seed | recomposed into the runtime's own memory store for the NEXT run |
+
+## The dispatch tool is `Agent` (historical alias `Task`)
+
+`Agent` takes `description` (3-5 words), `prompt`, optional `subagent_type` and
+`run_in_background`. Custom agents are `.zcode/agents/<name>.md`: frontmatter `description:`
+is required (3 words, used for status, not prompt detail), optional `tools`, `model`,
+`background`, `injectAgentsMd` (defaults to TRUE: the child inherits the project AGENTS.md;
+explicit `false` keeps the child lean). The child sees only its own file and the call's
+prompt -- never the parent conversation -- and returns text. Good for one shape: a bounded
+sub-task whose INPUT is large and whose ANSWER is small; a bad trade when the output is as
+big as the input.
+
+## Rules that discard the whole proposal
+
+- Skill directory names must match the frontmatter `name:` exactly, and every new skill
+  needs its trigger line IN THE SAME EDIT: a guideline like "skill files are self-documenting"
+  is wrong here -- zcode never reads the body without the trigger line.
+- `scripts/<name>.py` names are snake_case and scripts compile at validation; a referenced
+  helper must ship in the proposal.
+- Workspace hooks in this harness family are UNTRUSTED until granted: declared hooks are
+  recorded but skipped, so a check the work must not skip is a scripts/* step, not a hook.
+- Plugin manifests carry `name` (equal to the directory), `version`, `description`; nothing
+  loads a plugin whose manifest or enablement is missing.
+
+Hard rules, each learned from previous failures:
+- The most common failure of this family is producing NO deliverable because reasoning ate
+  the output budget. Always-on prose makes that WORSE. Prefer an on-demand skill; if you add
+  always-on text, cut something else.
+- `MEMORY.md` seeds the NEXT run's memory store; it does not inject into THIS proposal's
+  conversations, so keep long always-on reasoning out of memory text.
+- Never write runtime-owned files outside this table -- the memory store and session data
+  belong to the runtime, and writing them from a proposal is discarded.
+"""
+
+
+_SURFACE_ZCODE = """\
+# WHAT YOU CAN CHANGE
+
+The harness is a tree of components. Each has a different runtime cost and a different reach:
+
+| path | what it is | when it is in context |
+|---|---|---|
+| `AGENTS.md` | role, method, standing rules, tool guidance | ALWAYS ON -- every token competes with work output |
+| `.agents/skills/<name>/SKILL.md` | a reusable workflow | loaded ON DEMAND, only when invoked |
+| `.agents/skills/<name>/scripts/*` | a helper carried with its skill | run via the Bash tool |
+| `.zcode/agents/<name>.md` | a delegated subagent | runs in its OWN context via the `Agent` tool, returns text |
+| `.zcode/plugins/<name>/.zcode-plugin/plugin.json` | a local plugin | loads only with manifest + enablement |
+| `scripts/<name>.py` | a deterministic helper | run on demand via the Bash tool |
+| `MEMORY.md` | a memory seed | lands in the runtime memory store for the next run |
+
+The three that are easy to get wrong:
+
+`.agents/skills/` -- frontmatter needs a `description:` and its `name:` must equal the
+directory name, or the skill is dropped SILENTLY at load; a skill never NAMED in `AGENTS.md`
+as a trigger is never opened, so it is pure dead weight. If a skill calls a helper, that
+helper must travel with it.
+
+`.zcode/agents/` -- frontmatter needs a `description:` (3 words; it labels the dispatch, it
+is not detailed prose). The `Agent` tool dispatches with `subagent_type: <name>`; the child
+sees only what its own file and the call say, never the main conversation, and it returns
+text -- worth it for exactly one shape of problem: a bounded sub-task whose INPUT is large
+and whose ANSWER is small.
+
+`AGENTS.md` -- the only always-on file (its cap is a soft ceiling: zcode has no fixed
+documented cap). There IS a hook component on this surface (`hooks.enabled` / `hooks.events`
+in the project run-config file `.zcode/config.json`, events from
+SessionStart / UserPromptSubmit / PreToolUse / PermissionRequest / PostToolUse /
+PostToolUseFailure / Stop, each hook `{"type": "process"|"command", "command": ..., ...}`)
+-- but workspace hooks are UNTRUSTED by default and skipped, so a check the work must not
+skip is a `scripts/<name>.py` step in the workflow, not a hook, until trust wiring lands.
+
+Change only what a trajectory shows needs changing -- but WHERE you change something, the FORM
+matters as much as the content, and the cheap form is not the obvious one.
+
+ALWAYS-ON PROSE IS THE EXPENSIVE OPTION. Every word of `AGENTS.md` enters with the user
+`~/.zcode/AGENTS.md` text, and the most costly failure here is a run that reasons until the
+budget is gone and produces nothing. An on-demand component costs nothing until invoked.
+
+So prefer, in this order:
+  - a SKILL for anything with a recognisable trigger -- a procedure for a document type, a
+    format, a recurring situation. This is the default form for new instruction.
+  - a SCRIPT for a deterministic operation the runs hand-rolled and got wrong, or did slowly.
+  - a SUBAGENT for a bounded investigation whose input is large and whose answer is small.
+  - ALWAYS-ON TEXT last, and only for a short rule that genuinely applies to every run. If
+    you add always-on text, cut something else to pay for it.
+
+THREE RULES THAT DISCARD THE WHOLE PROPOSAL. Validation runs before any rollout, and a harness
+that fails it is thrown away entire.
+
+1. EVERY SKILL NEEDS A TRIGGER LINE IN AGENTS.md -- the most violated rule here by a wide
+   margin. If you create or keep `.agents/skills/<name>/SKILL.md`, its directory name must
+   appear VERBATIM in `AGENTS.md`, in the SAME edit:
+
+       When <the situation this skill handles>, use skills/<name>.
+
+   An unnamed skill is never opened anyway: the line is what makes it exist.
+
+2. SKILL FRONTMATTER IS EXACT: `name:` equals the directory name and `description:` exists,
+   or the skill is dropped SILENTLY at load. Always-on `AGENTS.md` stays non-empty -- an
+   empty instruction file is a harness that does not exist.
+
+3. EVERY SCRIPT YOU NAME MUST EXIST. A `scripts/<file>.py` invoked from a SKILL.md or from
+   always-on text must ship in the same proposal, a skill's own helper at
+   `.agents/skills/<skill-name>/scripts/<file>.py`; one dropped loose in the skill directory
+   is OFF the editable surface and silently discarded.
+
+THE DELIVERABLE'S SHAPE BELONGS TO THE REQUEST, NOT TO YOU. A harness changes HOW the agent
+works; it must never change WHAT SHAPE it delivers. Where the task names fields, columns,
+files, sections or an order, that shape is part of what was asked for. Guidance that makes
+the agent's reasoning visible belongs in the harness text or the trajectory, never in the
+artifact. A value the task asks for must be delivered AS A VALUE: a placeholder or a
+described-but-unperformed step leaves the reader to finish the work.
+
+# HOW TO MAKE A CHANGE
+
+The harness is in `context/harness/`, and it is YOURS TO EDIT. Open the files, change them in
+place with your normal tools, and create new ones where a new component is the right lever.
+Your edits on disk ARE the proposal -- there is no separate format to reproduce them in, and
+nothing you write in this reply changes the harness.
+
+- Files you do not touch are inherited unchanged. Do not rewrite a file to keep it the same.
+- Delete a file to remove that component.
+- If the evidence does not argue for any change, leave everything as it is and say KEEP_BASE
+  in your notes. That is a real answer, not a failure: adaptation the evidence does not
+  support costs context and buys nothing.
+
+Then reply with ONE `<notes>` block and nothing else: for each change, the moment in a
+trajectory that motivated it. The notes are read by a person, not applied by a machine.
+"""
+
+
 def _build_surface_texts() -> dict[str, _SurfaceText]:
     oc_tts = "\n\n".join(
         [
@@ -774,7 +920,29 @@ def _build_surface_texts() -> dict[str, _SurfaceText]:
             _surface_part(_SURFACE_APRIL, "# HOW TO MAKE A CHANGE"),
         ]
     )
+    zc_tts = "\n\n".join(
+        [
+            _TTS_SURFACE_HEAD_ZCODE,
+            _surface_part(_SURFACE_ZCODE, "THREE RULES THAT DISCARD", "THE DELIVERABLE'S SHAPE"),
+            _surface_part(_SURFACE_ZCODE, "# HOW TO MAKE A CHANGE"),
+        ]
+    )
     return {
+        "zcode": _SurfaceText(
+            surface_md=_SURFACE_ZCODE,
+            inv=_INV_TEMPLATE.replace(
+                "__LOOP_LEVER__",
+                "`scripts/<name>.py` step the workflow runs before it considers itself done "
+                "-- for example, refusing to finish before a {deliverable} exists (workspace "
+                "hooks stay untrusted here, so a hook cannot enforce it yet)",
+            ),
+            dom=_DOM_TEMPLATE.replace(
+                "__TRIGGER_SENTENCE__",
+                "A skill exists only once its name appears in `AGENTS.md` as a trigger: "
+                "write that trigger line in the same edit.",
+            ),
+            tts_surface=zc_tts,
+        ),
         "april": _SurfaceText(
             surface_md=_SURFACE_APRIL,
             inv=_INV_TEMPLATE.replace(

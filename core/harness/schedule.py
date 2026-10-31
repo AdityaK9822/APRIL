@@ -848,3 +848,56 @@ def run_sweep(
         "n_domains": len(order),
         "domains": rows,
     }
+
+
+def run_sweep_zcode(
+    k: int,
+    *,
+    runs_root: Path = Path("runs"),
+    library_root: Path | None = None,
+    split: str = "all",
+    modes: Sequence[str] = MODES,
+    seed: int | None = None,
+    tag: str = "",
+    domain_parallel: int = 1,
+    only_domains: Sequence[str] = (),
+    only_tasks: Sequence[str] = (),
+    max_tasks: int | None = None,
+    pool_policy: str = "finals",
+    prop: Proposer | None = None,
+    selector_prop: Proposer | None = None,
+) -> dict:
+    """The first full sweep on the zcode substrate (P1-1.6): the zcode adapter, the
+    proposer on `claude_cli`, everything else `run_sweep` semantics.
+
+    The CLI binary comes from `config.ZCODE_BIN` (`APRIL_ZCODE_BIN`); offline checks
+    point it at the process-boundary stub and pass a stand-in `prop`. Selector channel
+    defaults to the work channel, mirroring the Harness facade.
+    """
+    from .spec import resolve_channel_model
+    from .zcode_adapter import ZcodeAdapter
+
+    adapter = ZcodeAdapter()
+    if prop is None:
+        prop = Proposer(
+            spec=resolve_channel_model(
+                kind="claude_cli", model=_DEFAULT_CHANNEL_MODEL["claude_cli"]
+            )
+        )
+    return run_sweep(
+        k,
+        adapter=adapter,
+        prop=prop,
+        runs_root=Path(runs_root),
+        library_root=Path(library_root) if library_root else Path(runs_root) / "_library",
+        split=split,
+        modes=modes,
+        seed=seed,
+        tag=tag,
+        domain_parallel=domain_parallel,
+        only_domains=only_domains,
+        only_tasks=only_tasks,
+        max_tasks=max_tasks,
+        pool_policy=pool_policy,
+        selector_prop=selector_prop if selector_prop is not None else prop,
+    )

@@ -1,0 +1,32 @@
+{
+  "schema": "april.mcp-catalog/1",
+  "catalog": [
+    {
+      "id": "home-assistant",
+      "transport": "http",
+      "url": "http://192.0.2.10:8123/api/mcp",
+      "auth": "bearer token LAB_TOKEN (from the workspace env, never echoed)",
+      "tools": ["switch.set", "state.get", "automation.run", "history.stream"],
+      "scope": {"allow": ["lab-segment zone devices"], "must_not": ["abroad zones", "cloud bridges"]},
+      "risk_band": "medium"
+    },
+    {
+      "id": "objdet-local",
+      "transport": "stdio",
+      "command": "uvx objdet-mcp serve --model /models/yolo11n.task --device 0",
+      "auth": "none (local process)",
+      "tools": ["detect.frame", "detect.stream.new"],
+      "scope": {"allow": ["frames handed it stdin/args"], "must_not": ["network fetch"]},
+      "risk_band": "low"
+    },
+    {
+      "id": "ecg-stream",
+      "transport": "stdio",
+      "command": "/opt/lab/ecg-mcp --port lab-serial0 --baud 115200",
+      "auth": "none (local process)",
+      "tools": ["ecg.subscribe", "ecg.rPeakInterval"],
+      "scope": {"allow": ["lead-off-aware realtime stream"], "must_not": ["write access", "device config"]},
+      "risk_band": "high"
+    }
+  ]
+}
