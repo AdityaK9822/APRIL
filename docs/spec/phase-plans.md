@@ -14,6 +14,14 @@ it records what each phase changes, how it is verified, and what gates it.
   deliberate ceilings.
 - The budget ledger is asserted, never tolerated: if an exactness check fails on a
   fallback path, that is a defect to fix, not a tolerance to grant.
+- **One file, deliberately.** The plans stay in a single scroll so cross-phase
+  dependencies stay visible (ledger scaling hands P2→P3, substrate hand-off P0→P1,
+  spec-first ordering P4/P5). The split axis is **plan vs spec, not phase**: the three
+  P4/P5 specs (`ocean-profile-schema.md`, `zcode-substrate.md`,
+  `persona-dimension.md`) arrive as separate files because they have their own
+  lifecycles. Ceiling: once this doc passes roughly 600 lines, or per-phase execution
+  records start living in-repo, it splits into `docs/spec/phase-plans/<phase>.md`
+  plus an index.
 
 ---
 
