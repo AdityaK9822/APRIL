@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Budget accounting: R = 4k rollouts and P = 3k improvement stages.
+"""Budget accounting: R = (2 + n_dims)·k rollouts and P = (n_dims + 1)·k stage sessions.
 
+The default n_dims = 2 (INV + DOM) gives the standing identities R = 4k, P = 3k.
+P3's PSY dimension raises n_dims to 3 (R = 5k, P = 4k) without touching a caller.
 Base executions count toward each mode. Retries are separate invocation counts;
 selection and reflection are recorded outside this ledger.
 """
@@ -23,14 +25,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-def expected_rollouts(k: int) -> int:
-    """R = 4k: k shared base + 2k candidates + k finals."""
-    return 4 * int(k)
+def expected_rollouts(k: int, n_dims: int = 2) -> int:
+    """R = (2 + n_dims)·k: k shared base + n_dims·k dimension candidates + k finals.
+
+    n_dims=2 (INV + DOM) gives R = 4k; P3 adds the PSY dimension (n_dims=3 → 5k).
+    """
+    return (2 + int(n_dims)) * int(k)
 
 
-def expected_sessions(k: int) -> int:
-    """P = 3k: k INV + k DOM + k compositions (parallel: agg1..aggk; sequential: c1..ck)."""
-    return 3 * int(k)
+def expected_sessions(k: int, n_dims: int = 2) -> int:
+    """P = (n_dims + 1)·k: n_dims·k stage composers + k final compositions.
+
+    Parallel mode runs agg1..aggk; sequential runs c1..ck. n_dims=2 gives
+    P = 3k (k INV + k DOM + k compositions); n_dims=3 gives 4k.
+    """
+    return (int(n_dims) + 1) * int(k)
 
 
 class BudgetError(AssertionError):
@@ -87,8 +96,9 @@ class Ledger:
         return [e.label for e in self.entries if e.kind == kind]
 
     def assert_identity(self) -> None:
-        """Raise unless the recorded entries show exactly R=4k and P=3k with no duplicate
-        label. Duplicates are checked before the counts, because a duplicate can satisfy them.
+        """Raise unless the recorded entries show exactly R=(2+n_dims)·k and
+        P=(n_dims+1)·k (default n_dims=2: R=4k, P=3k) with no duplicate label.
+        Duplicates are checked before the counts, because a duplicate can satisfy them.
         """
         want_r, want_p = expected_rollouts(self.k), expected_sessions(self.k)
         rl, sl = self.labels("rollout"), self.labels("session")

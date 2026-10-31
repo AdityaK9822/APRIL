@@ -143,6 +143,14 @@ class Library:
             f"- components: {_inventory(self.surface, harness)}",
             "",
         ]
+        # P2: run provenance — the persona this lesson was distilled under and
+        # its compact ocean vector ("O70 C90 E45 A88 N20"). The transfer gate
+        # (P3) ranks lessons by cosine similarity over this vector.
+        if str(exp.get("profile_id", "")).strip():
+            oc = str(exp.get("ocean", "")).strip()
+            lines.append(
+                f"- **profile**: `{str(exp['profile_id']).strip()}`" + (f" — {oc}" if oc else "")
+            )
         if why.strip():
             lines += ["## Why this was chosen", why.strip(), ""]
         if exp.get("edits"):
@@ -180,6 +188,9 @@ class Library:
                 f"- harness: `harnesses/{name}/harness/` — {_inventory(self.surface, tree)}",
                 f"- why:     `harnesses/{name}/EXPERIENCE.md`",
             ]
+            persona = _field(ed / "EXPERIENCE.md", "profile")
+            if persona:
+                rows.append(f"- persona: {persona}")
             if cue:
                 rows.append(f"- cue:     {cue}")
             rows.append("")
@@ -292,6 +303,14 @@ def _coerce_root_experience_args(args: tuple[Any, ...], kwargs: dict[str, Any]) 
     normalized["evidence"] = str(data.get("evidence", _experience_value(experience, "evidence"))).strip()
     normalized["confidence"] = str(data.get("confidence", _experience_value(experience, "confidence") or "medium")).strip()
     normalized["status"] = str(data.get("status", _experience_value(experience, "status") or "adopted")).strip()
+    # P2: persona provenance may ride the payload or explicit kwargs; both are
+    # run facts written verbatim (never model claims).
+    normalized["profile_id"] = str(
+        data.get("profile_id", _experience_value(experience, "profile_id"))
+    ).strip()
+    normalized["ocean"] = str(
+        data.get("ocean", _experience_value(experience, "ocean"))
+    ).strip()
     if "domain" not in normalized or not normalized["domain"]:
         normalized["domain"] = str(data.get("domain", _experience_value(experience, "domain") or "unknown")).strip()
     if not normalized.get("task_id"):
@@ -337,6 +356,10 @@ def _append_root_experience(*args: Any, **kwargs: Any) -> Path:
         lines.append(f"- **Task ID**: {task_id}")
     if adopted:
         lines.append(f"- **Adopted**: {adopted}")
+    profile_id = data.get("profile_id", "")
+    if profile_id:
+        persona = f"`{profile_id}`" + (f" ({data.get('ocean', '')})" if data.get("ocean") else "")
+        lines.append(f"- **Persona**: {persona}")
     lines.extend(
         [
             f"- **Lesson**: {lesson}",

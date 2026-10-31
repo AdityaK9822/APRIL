@@ -26,6 +26,9 @@ __pycache__/
 # Reference repos/clones and moved harness (large, local-only)
 /docs/reference-repos/*/
 
+# ADE deployment root + local-only persona override (personal facts never commit).
+.ade/
+
 # Harness engine run state: runtime data, never repo content.
 runs/
 *.adapt_complete

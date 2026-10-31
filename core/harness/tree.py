@@ -251,6 +251,35 @@ def always_on_text(surface: SurfaceSpec, tree: Tree) -> str:
     return "\n\n".join(tree.get(a, "") for a in surface.always_on)
 
 
+# P2 constraint mode: persona clauses are always-on cost. A proposer may carry
+# persona/voice directives into an always-on file only under a `## persona:`
+# heading, and such sections are hard-capped; anything longer belongs in an
+# on-demand skill file (autotrigger makes it loadable, so the prose is not
+# paid on every rollout). # ponytail: the value is a self-judged ceiling
+# (~1500-2000 chars band) — much larger and this is a second system prompt
+# wearing a different name.
+PERSONA_CLAUSE_CAP = 1600
+
+_PERSONA_SECTION_RX = re.compile(r"^#{2,3}\s*persona\s*:.*$", re.I | re.M)
+_HEADING_RX = re.compile(r"^#{1,3}\s", re.M)
+
+
+def persona_clause_chars(src: str) -> int:
+    """Total characters inside `## persona:`-tagged sections of one file.
+
+    A section runs from its `## persona:` heading until the next heading (or
+    EOF). Code-fence `#` lines count as headings for this purpose — the scan
+    is a self-judged cap, not a security boundary.
+    """
+    starts = [h.start() for h in _HEADING_RX.finditer(src)]
+    total = 0
+    for m in _PERSONA_SECTION_RX.finditer(src):
+        following = [s for s in starts if s > m.start()]
+        end = min(following) if following else len(src)
+        total += end - m.start()
+    return total
+
+
 def autotrigger(surface: SurfaceSpec, tree: Tree, *, always_on_max: int | None = None) -> list[str]:
     """Give every skill a trigger line in always-on text; return the names repaired.
 
@@ -517,6 +546,17 @@ def validate(
             f"this framework, so an empty one is a harness that does not exist"
         )
 
+    for rel in surface.always_on:
+        if rel not in tree:
+            continue
+        n_persona = persona_clause_chars(tree[rel])
+        if n_persona > PERSONA_CLAUSE_CAP:
+            errs.append(
+                f"{rel}: `## persona:` section(s) are {n_persona} chars, over the "
+                f"{PERSONA_CLAUSE_CAP}-char always-on persona cap; move longer persona "
+                f"prose into an on-demand {surface.skill_dir}/<name>/SKILL.md"
+            )
+
     skills = _check_skills(surface, tree, body, errs)
     subs = _check_subagents(surface, tree, allow_subagents, errs)
 
@@ -539,6 +579,9 @@ def validate(
         raise ValueError(" | ".join(errs))
     out = {
         "always_on_chars": len(body),
+        "persona_clause_chars": sum(
+            persona_clause_chars(tree.get(rel, "")) for rel in surface.always_on
+        ),
         "n_files": len(tree),
         "skills": len(skills),
         "sub_agents": len(subs),

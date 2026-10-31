@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -71,6 +71,15 @@ class HarnessPrompts:
     yardstick: str = ""
     deliverable_word: str = "deliverable"
     domain_guidance: str = ""
+    # P2 constraint mode: `persona_guidance` is the COMPILED persona block (the
+    # output of personality.compile_persona) — normally filled by
+    # resolve_prompts from HarnessSpec.profile, or passed pre-compiled by a
+    # benchmark that manages its own profiles. It rides the same bad-word
+    # filter as every other mission slot.
+    persona_guidance: str = ""
+    # P3 seam, landed with the P2 slot extension: the PSY dimension's lever
+    # text (personality as a learnable axis). Empty until P3 fills it.
+    psy_levers: str = ""
     selection_checks: str = ""
     selection_lead: str = ""
     selection_conformance: str = "full"
@@ -87,6 +96,8 @@ class HarnessPrompts:
             "dom_levers": self.dom_levers,
             "yardstick": self.yardstick,
             "domain_guidance": self.domain_guidance,
+            "psy_levers": self.psy_levers,
+            "persona_guidance": self.persona_guidance,
             "selection_checks": self.selection_checks,
         }
         for field_name, value in visible.items():
@@ -109,6 +120,10 @@ class HarnessSpec:
     runs_root: Path = Path("runs")
     install_mode: str = "workspace_agents_md"
     prompts: HarnessPrompts = HarnessPrompts()
+    # P2: id of the committed profile in profiles/<id>.json that compiles into
+    # this spec's proposal missions ("" = run persona-free). The profile is
+    # data; personal facts never travel with it.
+    profile: str = ""
     channels: dict | None = None
     domain_word: str = "domain"
     leak_globs: tuple[str, ...] = ()
@@ -207,6 +222,23 @@ def resolve_prompts(adapter: AgentAdapter, task_id: str) -> HarnessPrompts:
         raise TypeError(
             f"{type(adapter).__name__}.prompts_for({task_id!r}) returned "
             f"{type(prompts).__name__}, expected HarnessPrompts"
+        )
+    # P2 constraint mode: when the spec names a profile, its compiled persona
+    # fills the `persona_guidance` slot unless the prompts already carry one
+    # (an explicit block wins — never overwrite a benchmark's own text). The
+    # reload happens HERE, per mission build, so a profile edit shows up
+    # without touching the adapter. Lazy import: the seam imports nothing.
+    spec = getattr(adapter, "spec", None)
+    profile_id = str(getattr(spec, "profile", "") or "").strip()
+    if (
+        isinstance(prompts, HarnessPrompts)
+        and profile_id
+        and not prompts.persona_guidance.strip()
+    ):
+        from .personality import compile_persona, load_profile
+
+        prompts = replace(
+            prompts, persona_guidance=compile_persona(load_profile(profile_id)).strip()
         )
     return prompts
 

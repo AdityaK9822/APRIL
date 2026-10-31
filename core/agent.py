@@ -989,6 +989,110 @@ if __name__ == '__main__':
         assert porcelain.stdout.strip() == "", porcelain.stdout
         checks.append("ZCode checkout byte-for-byte untouched (porcelain empty)")
 
+    # 10. P2: the personality kernel — demo() runs every pin, including the live
+    # byte-equal cross-check against personality.ts through bun.
+    from core.harness import personality
+    from core.harness.ledger import expected_rollouts, expected_sessions
+    from core.harness.spec import resolve_prompts
+
+    personality.demo()  # raises on any pin failure; includes the bun cross-check
+    april_profile = personality.load_profile("april")
+    d_april = personality.derive(april_profile)
+    assert (d_april.proactivity, d_april.humor, d_april.temperature) == (67, 43, 0.69), d_april
+    checks.append(
+        "personality kernel demo: compile_persona/derive/similarity pins green "
+        "(JS Math.round fidelity + bun cross-check)"
+    )
+
+    # 11. P2 constraint mode: profile-backed missions carry the compiled persona
+    # clauses; persona-free adapters render none; the selector stays blind.
+    t0 = ztasks[0]
+    zpersona = ZcodeAdapter(profile="april")
+    assert zpersona.spec.profile == "april" and ZcodeAdapter().spec.profile == ""
+    zres_p = resolve_prompts(zpersona, t0)
+    assert zres_p.persona_guidance.startswith("You are APRIL."), zres_p.persona_guidance[:40]
+    p_mission = harness_prompts.propose(zres_p, "INV", zsurface)
+    assert "You are APRIL." in p_mission and "## persona:" in p_mission, "mission lost the persona"
+    assert f"capped at {harness_prompts.PERSONA_CLAUSE_CAP}" in p_mission, "marker contract line missing"
+    assert "You are APRIL." in harness_prompts.aggregate(zres_p, zsurface, k=1)
+    assert "You are APRIL." in harness_prompts.compose_round(zres_p, zsurface, t=1, k=1)
+    assert "You are APRIL." not in harness_prompts.select(zres_p, n=2), "selector saw persona"
+    zfree = resolve_prompts(ZcodeAdapter(), t0)
+    assert zfree.persona_guidance == ""
+    assert "You are APRIL." not in harness_prompts.propose(zfree, "INV", zsurface)
+    low_persona = zres_p.persona_guidance.lower()
+    from core.harness.spec import HARNESS_PROMPT_BAD_WORDS
+
+    assert not any(b in low_persona for b in HARNESS_PROMPT_BAD_WORDS), "persona tripped the slot filter"
+    checks.append(
+        "constraint mode: profile-backed missions carry compiled persona clauses; "
+        "free adapter renders none; selector blind; slot filter passes"
+    )
+
+    # 12. P2: PERSONA_CLAUSE_CAP — tagged persona sections in always-on files are
+    # capped; over-cap trees are rejected through _accept_tree (retry path), and a
+    # legal in-cap persona section validates.
+    from core.harness import recursion
+
+    assert recursion.STAGE_ATTEMPTS == 2, recursion.STAGE_ATTEMPTS
+    zcensus = harness_tree.validate(zsurface, zg_ok, allow_subagents=True)
+    assert zcensus["persona_clause_chars"] == 0, zcensus
+    zps_tree = dict(zg_ok)
+    zps_tree["AGENTS.md"] = zg_ok["AGENTS.md"] + "\n## persona: voice\nStay stead when relays flap.\n"
+    pcensus = harness_tree.validate(zsurface, zps_tree, allow_subagents=True)
+    assert 0 < pcensus["persona_clause_chars"] <= harness_tree.PERSONA_CLAUSE_CAP, pcensus
+    over = dict(zg_ok)
+    over["AGENTS.md"] = zg_ok["AGENTS.md"] + "\n## persona: voice\n" + ("x" * (harness_tree.PERSONA_CLAUSE_CAP + 1))
+    _kept, cap_err = recursion._accept_tree(
+        zsurface, zpersona, over, dict(zg_ok), "p2-cap-gate"
+    )
+    assert "always-on persona cap" in cap_err and str(harness_tree.PERSONA_CLAUSE_CAP) in cap_err, cap_err
+    _kept, ok_err = recursion._accept_tree(
+        zsurface, zpersona, dict(zps_tree), dict(zg_ok), "p2-cap-in"
+    )
+    assert ok_err == "", ok_err
+    checks.append(
+        f"persona cap: in-cap `## persona:` section validates; over-cap tree rejected "
+        f"through _accept_tree (retry/fallback path, STAGE_ATTEMPTS={recursion.STAGE_ATTEMPTS})"
+    )
+
+    # 13. P2: ledger dims-parameterized identities + lesson persona provenance.
+    assert expected_rollouts(3) == 12 and expected_sessions(3) == 9
+    assert expected_rollouts(3, 3) == 15 and expected_sessions(3, 3) == 12
+    assert expected_rollouts(3, 1) == 9 and expected_sessions(3, 1) == 6
+    from core.harness.demo_adapter import DEMO_SURFACE
+    from core.harness.library import Library
+
+    libdir = Path(tempfile.mkdtemp(prefix="april-p2-library-"))
+    try:
+        lib = Library(root=libdir, domain="demo", surface=DEMO_SURFACE)
+        entry = lib.add(
+            "task-002",
+            {"AGENTS.md": "Base."},
+            label="agg1",
+            experience={
+                "cue": "ledger sums drop credits",
+                "lesson": "include both signs",
+                "evidence": "probe total flipped after the filter drop",
+                "profile_id": "april",
+                "ocean": personality.ocean_row(april_profile),
+            },
+        )
+        entry_text = (entry / "EXPERIENCE.md").read_text()
+        assert f"- **profile**: `april` — {personality.ocean_row(april_profile)}" in entry_text, entry_text
+        index_text = lib.rebuild_index().read_text()
+        assert "- persona: `april` — O70 C90 E45 A88 N20" in index_text, index_text
+    finally:
+        shutil.rmtree(libdir, ignore_errors=True)
+    exp_doc = Path.cwd().joinpath("EXPERIENCE.md").read_text()
+    assert "| Task ID | Domain | Adopted | Persona | Lesson |" in exp_doc, "EXPERIENCE.md header lost Persona"
+    for pfile in sorted(Path.cwd().glob("profiles/*.json")):
+        assert "userContext" not in json.loads(pfile.read_text()), pfile
+    checks.append(
+        "ledger n_dims identities (2→4k/3k, 3→5k/4k); lessons carry {profile_id, ocean} "
+        "into entries + index; EXPERIENCE.md Persona column; profiles stay userContext-free"
+    )
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")

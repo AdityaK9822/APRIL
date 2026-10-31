@@ -11,15 +11,19 @@ corrections are recorded as new rows with an updated `Status`.
 
 Each adopted harness contributes one row:
 
-| Task ID | Domain | Adopted | Lesson | Cue | Evidence | Confidence | Status |
-|---|---|---|---|---|---|---|---|
-| `task-001` | `accounting` | `agg1` (run `demo-001/ledger-1/agg1`) | Include both signs when summing in `scripts/summarize.py`. | Ledger includes credits and debits. | `scripts/summarize.py` row: dropping the positive-only filter changed the probe total to include credits. | high | adopted |
+| Task ID | Domain | Adopted | Persona | Lesson | Cue | Evidence | Confidence | Status |
+|---|---|---|---|---|---|---|---|---|
+| `task-001` | `accounting` | `agg1` (run `demo-001/ledger-1/agg1`) | — | Include both signs when summing in `scripts/summarize.py`. | Ledger includes credits and debits. | `scripts/summarize.py` row: dropping the positive-only filter changed the probe total to include credits. | high | adopted |
 
 ### Field notes
 
 - **Task ID** — stable identifier of the originating task (`<domain>/<task>` or `task-NNN`).
 - **Domain** — the component/domain family the lesson applies to.
 - **Adopted** — the adopted harness id plus the run path that produced it.
+- **Persona** — the profile id this run compiled persona clauses from, plus its compact
+  ocean vector, e.g. `` `april` (O70 C90 E45 A88 N20) ``. `—` when the run was persona-free
+  (P2 constraint mode keeps the selector blind; this column is run provenance, not rank input
+  until P3's similarity gate turns it on).
 - **Lesson** — the transferable instruction for future harness authors.
 - **Cue** — the trigger condition under which the lesson applies.
 - **Evidence** — the concrete observation that supports the lesson.

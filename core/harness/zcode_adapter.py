@@ -26,7 +26,7 @@ import re
 import signal
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Mapping
 
@@ -135,6 +135,14 @@ class ZcodeAdapter:
     )
     substrate: ZcodeSubstrate = field(default_factory=ZcodeSubstrate)
     tasks_dir: Path = BENCHTASKS_DIR
+    # P2: the committed profile whose compiled persona rides the proposal
+    # missions ("" = persona-free). Mirrored onto spec.profile so every prompt
+    # seam (resolve_prompts) sees it.
+    profile: str = ""
+
+    def __post_init__(self) -> None:
+        if str(self.profile or "").strip() and self.spec.profile != self.profile:
+            self.spec = replace(self.spec, profile=self.profile)
 
     # -- the benchmark seam ------------------------------------------------------
 

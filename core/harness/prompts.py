@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass
 
 from .spec import BenchPrompts
-from .tree import SurfaceSpec
+from .tree import PERSONA_CLAUSE_CAP, SurfaceSpec
 
 VERSION = "harness2-1"
 
@@ -1000,6 +1000,35 @@ def _st(surface: SurfaceSpec | str) -> _SurfaceText:
     return got
 
 
+def _persona_part(bp: BenchPrompts) -> str:
+    """The compiled-persona section of a proposal mission ('' when persona-free).
+
+    Constraint mode: the persona shapes HOW this editor thinks, writes and
+    weighs evidence -- it never relaxes a mission rule, never widens the task,
+    and never reaches the selector (blind selection stays persona-free). The
+    block also carries the `## persona:` marker contract: voice text the
+    proposer writes into always-on files must be tagged so tree validation can
+    cap it.
+    """
+    body = bp.persona_guidance.strip()
+    if not body:
+        return ""
+    return (
+        "# PERSONA\n\n"
+        "A committed profile was compiled into this run; its text, below, is binding "
+        "on you. It shapes tone, candor, caution and what you flag. It operates WITHIN "
+        "this mission: nothing in it relaxes a rule above, widens the task, or changes "
+        "the output contract. If you write persona or voice directives into an "
+        "always-on harness file (system_prompt / AGENTS.md / guardrails), mark the "
+        "section with a `## persona:` heading -- such sections are hard-capped at "
+        f"{PERSONA_CLAUSE_CAP} characters per file; longer persona prose belongs in an "
+        "on-demand skill file, never in always-on text.\n\n"
+        "----- compiled persona -----\n\n"
+        f"{body}\n\n"
+        "----- end persona -----"
+    )
+
+
 def _tts_propose(bp: BenchPrompts, dim: str, st: _SurfaceText, *, k: int, index: int) -> str:
     """propose(), in the tts pack's words."""
     block = (_TTS_INV if dim == "INV" else _TTS_DOM).format(
@@ -1032,6 +1061,8 @@ def _tts_propose(bp: BenchPrompts, dim: str, st: _SurfaceText, *, k: int, index:
     ]
     if bp.yardstick.strip():
         parts.append(f"# WHAT GOOD PROCESS LOOKS LIKE HERE\n\n{bp.yardstick.strip()}")
+    if bp.persona_guidance.strip():
+        parts.append(_persona_part(bp))
     parts += [ANSWER_FREE, EVIDENCE_BOUNDARY, st.tts_surface]
     return _tidy("\n\n".join(parts))
 
@@ -1090,6 +1121,7 @@ def _tts_aggregate(bp: BenchPrompts, st: _SurfaceText, *, k: int, index: int) ->
         ANSWER_FREE,
         EVIDENCE_BOUNDARY,
         st.tts_surface,
+        *([_persona_part(bp)] if bp.persona_guidance.strip() else []),
         "# NOTES FORMAT\n\n"
         "In your single `<notes>` block, one line per decision:\n\n"
         "    kept|revised|dropped -> <which edit> -> <the evidence: what the trajectories "
@@ -1214,6 +1246,8 @@ def propose(
     ]
     if bp.yardstick.strip():
         parts.append(f"# WHAT GOOD PROCESS LOOKS LIKE HERE\n\n{bp.yardstick.strip()}")
+    if bp.persona_guidance.strip():
+        parts.append(_persona_part(bp))
     parts += [ANSWER_FREE, EVIDENCE_BOUNDARY, st.surface_md]
     return _tidy("\n\n".join(parts))
 
@@ -1278,6 +1312,7 @@ def aggregate(bp: BenchPrompts, surface: SurfaceSpec | str, *, k: int = 1, index
                 ANSWER_FREE,
                 EVIDENCE_BOUNDARY,
                 st.surface_md,
+                *([_persona_part(bp)] if bp.persona_guidance.strip() else []),
                 "# NOTES FORMAT\n\n"
                 "In your single `<notes>` block, one line per decision, in this exact shape:\n\n"
                 "    kept|revised|dropped -> <which edit> -> <the trajectory moment or base-set "
@@ -1328,6 +1363,7 @@ def compose_round(bp: BenchPrompts, surface: SurfaceSpec | str, *, t: int, k: in
                 + "\n\nHere `KEEP_BASE` means keep the CURRENT checkpoint in `context/harness/` "
                 "unchanged; it does not restore the original harness. In `<notes>`, identify which "
                 "rounds' edits survive and which were dropped or restored.",
+                *([_persona_part(bp)] if bp.persona_guidance.strip() else []),
                 ANSWER_FREE,
                 EVIDENCE_BOUNDARY,
                 st.surface_md,

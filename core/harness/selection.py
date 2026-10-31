@@ -501,5 +501,15 @@ def _distil(
         return {}
     if edits:
         out["edits"] = edits.group(1).strip()
+    # P2: run facts, not model claims — the persona this lesson was distilled
+    # under and its compact ocean vector ("O70 C90 E45 A88 N20"). Library
+    # entries carry them; P3's transfer gate ranks lessons by cosine
+    # similarity over the vector; the selector never sees any of it.
+    profile_id = str(getattr(getattr(adapter, "spec", None), "profile", "") or "").strip()
+    if profile_id:
+        from .personality import load_profile, ocean_row
+
+        out["profile_id"] = profile_id
+        out["ocean"] = ocean_row(load_profile(profile_id))
     context.assert_tree_has_no_grader_verdicts({"EXPERIENCE.md": json.dumps(out)})
     return out
