@@ -20,7 +20,165 @@ from .events import get_event_bus, Event, LogEvent, ErrorEvent, StatusEvent
 from tools.shell import ShellTool
 
 
+def _harness_spec():
+    """APRIL's HarnessSpec, cached; None only if the harness engine fails to import."""
+    global _HARNESS_SPEC_CACHE
+    if _HARNESS_SPEC_CACHE is None:
+        from .harness.april_spec import APRIL_SPEC
+
+        _HARNESS_SPEC_CACHE = APRIL_SPEC
+    return _HARNESS_SPEC_CACHE
+
+
+_HARNESS_SPEC_CACHE = None
+
+
 class AgentRuntime:
+    @property
+    def spec(self):
+        try:
+            return _harness_spec()
+        except Exception:
+            return None
+
+    @property
+    def substrate(self):
+        """APRIL's own substrate: the editable file surface of a deployed harness."""
+        from .substrate.april import APRIL_SUBSTRATE
+
+        return APRIL_SUBSTRATE
+
+    def tasks(self, split="all"):
+        return []
+
+    def domain_of(self, task_id):
+        return "default"
+
+    def task_prompt(self, task_id):
+        return str(task_id)
+
+    def task_files(self, task_id):
+        return None
+
+    def _runs_root(self):
+        """One runs root for adapter runs and the schedule's work dirs: the
+        `APRIL_RUNS_ROOT` env override when set, else `spec.runs_root`."""
+        from pathlib import Path
+
+        env = os.environ.get("APRIL_RUNS_ROOT", "").strip()
+        spec = self.spec
+        return (
+            Path(env) if env
+            else Path(getattr(spec, "runs_root", Path("runs")) if spec else Path("runs"))
+        )
+
+    def _executor_mode(self):
+        """`dry` (default) is the offline structural executor; `live` arrives in P1
+        with the zcode substrate."""
+        return str(os.environ.get("APRIL_EXECUTOR", "dry")).strip().lower() or "dry"
+
+    def execute(self, task_id, harness_dir=None, run_id=None, timeout=None):
+        """One rollout. `dry` writes a structural run dir under the runs root: no
+        model, no network, no device. Marked `.adapt_complete` by the recursion layer.
+        """
+        from pathlib import Path
+
+        if self._executor_mode() != "dry":
+            raise NotImplementedError(
+                f"APRIL_EXECUTOR={self._executor_mode()!r}: the live executor hands "
+                f"rollouts to the zcode substrate, which lands in P1"
+            )
+        root = self._runs_root()
+        parts = [p for p in str(run_id or task_id).replace("\\", "/").split("/") if p not in ("", ".")]
+        if not parts or ".." in parts:
+            raise ValueError(f"run_id {run_id!r} must name a run dir under the runs root")
+        run_dir = root.joinpath(*parts)
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        from .harness import runmark, tree as harness_tree
+
+        surface = self.substrate.surface()
+        if harness_dir is not None:
+            committed = harness_tree.read_tree(surface, Path(harness_dir))
+            harness_line = (
+                f"harness: {len(committed)} file(s) on the surface "
+                f"[{runmark.fingerprint(Path(harness_dir))}]: "
+                + (", ".join(sorted(committed)) or "(none)")
+            )
+        else:
+            committed = None
+            harness_line = "harness: base (inherited)"
+        trajectory = (
+            "APRIL dry executor: structural rollout (no model attached, no network).\n"
+            f"task_id: {task_id}\n"
+            f"run_id: {run_id or task_id}\n"
+            f"{harness_line}\n"
+        )
+        (run_dir / "trajectory.txt").write_text(trajectory, encoding="utf-8")
+
+        deliverables = run_dir / "deliverables"
+        deliverables.mkdir(parents=True, exist_ok=True)
+        deliverable = (
+            f"# {task_id}\n\n{self.task_prompt(task_id)}\n\n{harness_line}\n"
+        )
+        (deliverables / "deliverable.md").write_text(deliverable, encoding="utf-8")
+        return run_dir
+
+    def delivered(self, run_dir):
+        from pathlib import Path
+
+        return (Path(run_dir) / "deliverables" / "deliverable.md").is_file()
+
+    def trajectory(self, run_dir, *, obs_trunc=None):
+        from pathlib import Path
+
+        limit = int(obs_trunc) if obs_trunc else 50_000
+        try:
+            body = (Path(run_dir) / "trajectory.txt").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+        return body[:limit] + (f"\n... [trajectory clipped to {limit} chars]" if len(body) > limit else "")
+
+    def deliverable_files(self, run_dir):
+        from pathlib import Path
+
+        d = Path(run_dir) / "deliverables"
+        if not d.is_dir():
+            return {}
+        return {p.name: str(p) for p in sorted(d.glob("*")) if p.is_file()}
+
+    def deliverable_text(self, run_dir):
+        from pathlib import Path
+
+        p = Path(run_dir) / "deliverables" / "deliverable.md"
+        return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+
+    def base_harness(self):
+        """The shipped base tree: a minimal 3-file always-on harness for APRIL itself."""
+        from pathlib import Path
+
+        return Path(__file__).resolve().parent / "harness" / "basetree" / "april"
+
+    def validate_tree(self, tree):
+        from core.components.base import default_registry
+        from .harness import tree as harness_tree
+
+        spec = self.spec
+        harness_tree.validate(
+            self.substrate.surface(),
+            tree,
+            allow_subagents=getattr(spec, "allow_subagents", False) if spec else False,
+            reserved_scripts=harness_tree.RESERVED_SCRIPTS
+            | (getattr(spec, "reserved_scripts", frozenset()) if spec else frozenset()),
+        )
+        problems = default_registry().validate_all(tree)
+        if problems:
+            raise ValueError(" | ".join(problems))
+
+    def score(self, run_dir, task_id):
+        return None
+
+
     """
     The core agent runtime
     
@@ -477,17 +635,89 @@ class AgentRuntime:
         self._cancellation_tokens.pop(session_id, None)
 
 
-# Example usage
+# Offline self-check: the P0 acceptance path. No model, no network, no device.
 if __name__ == '__main__':
+    import asyncio
+    import json
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    from core.components.base import default_registry
+    from core.harness import tree as harness_tree
+    from core.harness import Harness
+    from core.harness import config as harness_config
+    from core.harness.proposer import Proposer, ProposerError
+    from core.harness.spec import resolve_channel_model
+
+    checks = []
+
+    # 1. The config surface is complete and the broken channel is never the fallback.
+    assert harness_config.BUN, "config.BUN must resolve a launcher binary"
+    assert isinstance(harness_config.OPENCODE_DIR, str), "config.OPENCODE_DIR stays a raw string"
+    assert harness_config.DEFAULT_PROPOSER_CHANNEL == "claude_cli"
+    checks.append("config surface: BUN / OPENCODE_DIR / DEFAULT_PROPOSER_CHANNEL")
+
+    # 2. The opencode channel fails closed as a ProposerError, never an AttributeError.
+    prop = Proposer(spec=resolve_channel_model(kind="opencode", model="openai/gpt-4o-mini"))
     try:
-        from core.config import AgentConfig
-        config = AgentConfig.from_env()
-        print(f'Loaded config: model={config.model}')
-        
-        agent = AgentRuntime(config)
-        print(f'Agent initialized with tools: {list(agent.tool_map.keys())}')
-        
-    except Exception as e:
-        print(f'Error: {e}')
-        import traceback
-        traceback.print_exc()
+        prop.call("mission", None, "demo.channel")
+        raise AssertionError("the opencode channel must fail without a checkout")
+    except ProposerError:
+        pass
+    checks.append("opencode channel fails as ProposerError")
+
+    # 3. The shipped base tree survives tree.validate + ComponentRegistry.validate_all.
+    config = AgentConfig.from_env()
+    agent = AgentRuntime(config)
+    surface = agent.substrate.surface()
+    base_tree = harness_tree.read_tree(surface, agent.base_harness())
+    census = harness_tree.validate(surface, base_tree, allow_subagents=agent.spec.allow_subagents)
+    problems = default_registry().validate_all(base_tree)
+    assert not problems, problems
+    agent.validate_tree(base_tree)
+    checks.append(f"base tree validates: {census}")
+
+    # 4. A dry rollout writes a run dir with a trajectory and a delivered deliverable.
+    rd = agent.execute("demo-0001", None, "demo/demo-0001/base1")
+    assert agent.delivered(rd), "dry rollout must deliver"
+    assert agent.trajectory(rd).strip() and agent.deliverable_text(rd).strip()
+    checks.append(f"dry rollout: {Path(rd)}")
+
+    # 5. End to end run_task, dry: ledger identity exact, markers carry a real fingerprint.
+    tmp = Path(tempfile.mkdtemp(prefix="april-demo-runs-"))
+    old_executor = os.environ.get("APRIL_EXECUTOR")
+    old_root = os.environ.get("APRIL_RUNS_ROOT")
+    os.environ.update({"APRIL_EXECUTOR": "dry", "APRIL_RUNS_ROOT": str(tmp / "runs")})
+    try:
+        res = asyncio.run(
+            Harness(agent, runs_root=tmp / "runs").run_task("demo-0001", k=1)
+        )
+    finally:
+        if old_executor is None:
+            os.environ.pop("APRIL_EXECUTOR", None)
+        else:
+            os.environ["APRIL_EXECUTOR"] = old_executor
+        if old_root is None:
+            os.environ.pop("APRIL_RUNS_ROOT", None)
+        else:
+            os.environ["APRIL_RUNS_ROOT"] = old_root
+    assert res.status == "ok", (res.status, res.errors)
+    for mode, rec in res.modes.items():
+        led = rec["ledger"]
+        assert led["R"] == led["expected_R"] == 4, (mode, led)
+        assert led["P"] == led["expected_P"] == 3, (mode, led)
+        assert led["rollouts"] == ["base1", "inv1", "dom1", ("agg1" if mode == "agg" else "c1")]
+    marks = list((tmp / "runs").rglob(".adapt_complete"))
+    assert marks, "runmark.mark_complete never fired"
+    for m in marks:
+        payload = json.loads(m.read_text())
+        assert payload["harness"] not in ("absent", "", "base"), payload
+        assert payload["version"] == 1, payload
+    checks.append(f"end-to-end run_task dry: ledgers R=4k/P=3k, {len(marks)} markers")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    for line in checks:
+        print(f"  ok: {line}")
+    print("APRIL offline self-checks passed.")
+

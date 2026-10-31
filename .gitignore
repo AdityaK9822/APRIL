@@ -7,7 +7,6 @@ OpenINT/
 OpenINT.xcodeproj/
 .venv/
 venv/
-// ...existing code...
 venv-*/
 voices/
 models/
@@ -23,3 +22,15 @@ __pycache__/
 **/xcuserdata/
 **/.DS_Store
 .DS_Store
+
+# Reference repos/clones and moved harness (large, local-only)
+/docs/reference-repos/*/
+
+# Harness engine run state: runtime data, never repo content.
+runs/
+*.adapt_complete
+
+# Build and editor artifacts.
+build/
+*.egg-info/
+.vscode/
