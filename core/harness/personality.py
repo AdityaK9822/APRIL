@@ -270,14 +270,33 @@ def similarity(a: PersonaConfig | Profile, b: PersonaConfig | Profile) -> float:
     """Cosine over `ocean/100`. 1.0 = same shape, 0.0 = orthogonal. The library's
     transfer gate (P3) ranks lessons by this; below-threshold entries load only
     when they say they are transferable."""
-    va = persona_of(a).ocean.vector()
-    vb = persona_of(b).ocean.vector()
-    dot = sum(x * y for x, y in zip(va, vb))
-    na = math.sqrt(sum(x * x for x in va))
-    nb = math.sqrt(sum(x * x for x in vb))
+    return cosine(persona_of(a).ocean.vector(), persona_of(b).ocean.vector())
+
+
+def cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    """Cosine between two equal-length vectors; 0.0 when either has no length.
+
+    Scale-invariant, so a vector of raw 0..100 values and one of `ocean/100`
+    values compare identically. Library lesson rows store the raw form.
+    """
+    if len(a) != len(b):
+        raise ValueError(f"cosine needs equal-length vectors, got {len(a)} and {len(b)}")
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
     if na == 0.0 or nb == 0.0:
         return 0.0
     return dot / (na * nb)
+
+
+_OCEAN_ROW = re.compile(r"O(\d+)\s+C(\d+)\s+E(\d+)\s+A(\d+)\s+N(\d+)")
+
+
+def parse_ocean_row(text: str) -> tuple[int, ...] | None:
+    """Read the compact `O70 C90 E45 A88 N20` row out of lesson metadata."""
+    m = _OCEAN_ROW.search(str(text or ""))
+    return tuple(int(g) for g in m.groups()) if m else None
+
 
 
 # ---------- System prompt builder (the persona compiler) ----------
@@ -301,6 +320,54 @@ THRESHOLD_RULES: tuple[tuple[str, int, str], ...] = (
     ("structure", 70,
      "Follow stated formats and constraints exactly, and never change requirements silently."),
 )
+
+
+def psy_mechanism(p: PersonaConfig | Profile) -> str:
+    """The PSY dimension's turnable levers, derived from `derive()` params only.
+
+    P3 promotes personality from constraint to a learnable axis: the proposer may
+    change HOW the harness expresses behavior (tone, pacing, delegation,
+    verification temperament) but never re-derives OCEAN traits from the profile
+    at proposal time. Everything below is a function of the same derived
+    parameters the compiler uses, so the PSY lane and the persona block cannot
+    drift apart. This text is a mission slot and rides the bad-word filter.
+    """
+    p = persona_of(p)
+    d = derive(p)
+    lines = [
+        "Derived behavior for the active profile. Encode the mechanism, never the label:",
+        f"- Voice: warmth {d.warmth}/100, formality {d.formality}/100, humor {d.humor}/100, "
+        f"typical reply length {d.length}.",
+        f"- Candor: {d.candor}/100 -- say the hard thing once, plainly; kindness changes how "
+        f"it is said, never whether it is said.",
+        "- Pacing: "
+        + (
+            f"proactivity {d.proactivity}/100 -- lead with the answer, then name the next step "
+            f"briefly, without starting unrequested work."
+            if d.proactivity >= 60
+            else f"proactivity {d.proactivity}/100 -- lead with the answer and stop; do not "
+            f"volunteer extra work."
+        ),
+        "- Delegation: "
+        + (
+            f"structure {d.structure}/100 -- prefer one bounded, large-input/small-output "
+            f"sub-task handed to a helper in its own context; keep the hand-off self-contained."
+            if d.structure >= 70
+            else f"structure {d.structure}/100 -- keep the work inline; add no delegation layer."
+        ),
+        f"- Verification temperament: caution {d.caution}/100, structure {d.structure}/100 -- "
+        + (
+            "re-open the produced artifact and check it mechanically before finishing, and ask "
+            "before an irreversible or outward-facing action."
+            if d.caution >= 60 or d.structure >= 70
+            else "check the artifact once; add no approval ceremony beyond the task's own rules."
+        ),
+    ]
+    for name, threshold, rule in THRESHOLD_RULES:
+        if getattr(d, name) >= threshold:
+            lines.append(f"- Threshold rule ({name} >= {threshold}): {rule}")
+    return "\n".join(lines)
+
 
 
 def compile_persona(p: PersonaConfig | Profile) -> str:

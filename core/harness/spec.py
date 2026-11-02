@@ -230,16 +230,20 @@ def resolve_prompts(adapter: AgentAdapter, task_id: str) -> HarnessPrompts:
     # without touching the adapter. Lazy import: the seam imports nothing.
     spec = getattr(adapter, "spec", None)
     profile_id = str(getattr(spec, "profile", "") or "").strip()
-    if (
-        isinstance(prompts, HarnessPrompts)
-        and profile_id
-        and not prompts.persona_guidance.strip()
-    ):
-        from .personality import compile_persona, load_profile
+    if isinstance(prompts, HarnessPrompts) and profile_id:
+        from .personality import compile_persona, load_profile, psy_mechanism
 
-        prompts = replace(
-            prompts, persona_guidance=compile_persona(load_profile(profile_id)).strip()
-        )
+        profile = load_profile(profile_id)
+        updates: dict[str, str] = {}
+        if not prompts.persona_guidance.strip():
+            updates["persona_guidance"] = compile_persona(profile).strip()
+        # P3: a profile-backed run activates the PSY dimension. The slot carries
+        # derive() params, never raw traits, and stays empty on persona-free runs
+        # (which is exactly the signal `prompts.active_dims` reads).
+        if not prompts.psy_levers.strip():
+            updates["psy_levers"] = psy_mechanism(profile).strip()
+        if updates:
+            prompts = replace(prompts, **updates)
     return prompts
 
 

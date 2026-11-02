@@ -25,6 +25,14 @@ from . import context
 from . import tree as harness_tree
 from .tree import SurfaceSpec
 
+# P3: the transfer gate. A lesson distilled under a different persona loads into a
+# profile-backed run only when its OCEAN shape is close enough to the active one,
+# or when the lesson itself marks it transferable (INV/DOM edits are, PSY-only
+# edits are not). 0.95 keeps same-persona lessons and gates a genuinely different
+# persona shape; measured: april<->user 0.9667 passes, april<->verifier 0.9111
+# is gated unless transferable.
+SIMILARITY_FLOOR = 0.95
+
 
 def slug(task_id: str) -> str:
     return task_id.replace("/", "__")
@@ -46,6 +54,10 @@ class Library:
     root: Path
     domain: str
     surface: SurfaceSpec
+    # P3: the persona this library serves. Empty means persona-free retrieval
+    # (recency order); a non-empty profile ranks by OCEAN cosine and applies
+    # the transfer gate.
+    profile: str = ""
 
     @property
     def dir(self) -> Path:
@@ -68,27 +80,45 @@ class Library:
         d = self.dir / "harnesses"
         return sorted(p.name for p in d.iterdir() if p.is_dir()) if d.is_dir() else []
 
-    def load_context(self, max_entries: int = 5) -> str:
-        """Load past experience in this domain as in-context memory text."""
+    def load_context(self, max_entries: int = 5, *, profile: str | None = None) -> str:
+        """Load past experience in this domain as in-context memory text.
+
+        Persona-free retrieval keeps the recency order this library has always
+        used. With a profile active, entries are ranked by OCEAN cosine against
+        the profile and a below-floor entry whose lesson is not `transferable`
+        is withheld: a PSY-specific lesson learned under a different persona is
+        not evidence for this one. Entries with no stored vector (persona-free
+        lessons) stay eligible when transferable and sort last.
+        """
         if not self.exists():
             return ""
         names = self.entries()
         if not names:
             return ""
 
-        # Most recently added entries first (by directory mtime), then lexically.
         entry_paths = [self.dir / "harnesses" / name for name in names]
-        try:
-            entry_paths.sort(key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
-        except OSError:
-            entry_paths.sort(key=lambda p: p.name, reverse=True)
+        active = str(profile if profile is not None else self.profile).strip()
+
+        if not active:
+            # Most recently added entries first (by directory mtime), then lexically.
+            try:
+                entry_paths.sort(key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+            except OSError:
+                entry_paths.sort(key=lambda p: p.name, reverse=True)
+            selected = entry_paths[: max(0, int(max_entries))]
+        else:
+            selected = self._ranked(entry_paths, active, max_entries)
 
         parts: list[str] = []
-        if self.index.is_file():
+        if active:
+            # A gated lesson must not leak back in through the browse index: the
+            # index for a profile-backed run lists only the entries that passed
+            # the cosine gate.
+            parts.append(self._index_text([p.name for p in selected]).strip())
+        elif self.index.is_file():
             parts.append(self.index.read_text(encoding="utf-8", errors="replace").strip())
 
-        limit = max(0, int(max_entries))
-        for entry in entry_paths[:limit]:
+        for entry in selected:
             exp_path = entry / "EXPERIENCE.md"
             if not exp_path.is_file():
                 continue
@@ -97,6 +127,31 @@ class Library:
                 parts.append(f"---\n# {entry.name}\n\n{body}")
 
         return "\n\n".join(parts).strip()
+
+    def _ranked(self, entry_paths: list[Path], profile: str, max_entries: int) -> list[Path]:
+        """Cosine-rank entries for `profile`, dropping gated non-transferable ones."""
+        from .personality import cosine, load_profile, parse_ocean_row
+
+        vector = load_profile(profile).persona.ocean.vector()
+        scored: list[tuple[float, float, str, Path]] = []
+        for entry in entry_paths:
+            exp_path = entry / "EXPERIENCE.md"
+            meta = _field(exp_path, "profile")
+            row = parse_ocean_row(meta)
+            transferable = _field(exp_path, "transferable").strip().lower() != "false"
+            if row is not None:
+                score = cosine(vector, tuple(v / 100 for v in row))
+            else:
+                score = 0.0
+            if score < SIMILARITY_FLOOR and not transferable:
+                continue
+            try:
+                mtime = entry.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            scored.append((score, mtime, entry.name, entry))
+        scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        return [entry for _score, _mtime, _name, entry in scored[: max(0, int(max_entries))]]
 
     def tree_of(self, task_id: str) -> harness_tree.Tree:
         return harness_tree.read_tree(self.surface, self.entry_dir(task_id) / "harness")
@@ -151,6 +206,11 @@ class Library:
             lines.append(
                 f"- **profile**: `{str(exp['profile_id']).strip()}`" + (f" — {oc}" if oc else "")
             )
+        # P3: the transfer mark is written even for persona-free lessons: absent
+        # means transferable, and an explicit `false` is what the cosine gate
+        # reads when a lesson is PSY-specific.
+        transferable = exp.get("transferable", True)
+        lines.append(f"- **transferable**: {'true' if transferable else 'false'}")
         if why.strip():
             lines += ["## Why this was chosen", why.strip(), ""]
         if exp.get("edits"):
@@ -168,6 +228,11 @@ class Library:
         return d
 
     def rebuild_index(self) -> Path:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.index.write_text(self._index_text(self.entries()), encoding="utf-8")
+        return self.index
+
+    def _index_text(self, names: Sequence[str]) -> str:
         rows = [
             f"# Library — {self.domain}",
             "",
@@ -176,7 +241,6 @@ class Library:
             "open the entries that look relevant to the matter in front of you.",
             "",
         ]
-        names = self.entries()
         if not names:
             rows.append("_(empty — this is the first task in this domain)_")
         for name in names:
@@ -191,12 +255,13 @@ class Library:
             persona = _field(ed / "EXPERIENCE.md", "profile")
             if persona:
                 rows.append(f"- persona: {persona}")
+            transferable = _field(ed / "EXPERIENCE.md", "transferable")
+            if transferable:
+                rows.append(f"- transferable: {transferable}")
             if cue:
                 rows.append(f"- cue:     {cue}")
             rows.append("")
-        self.dir.mkdir(parents=True, exist_ok=True)
-        self.index.write_text("\n".join(rows), encoding="utf-8")
-        return self.index
+        return "\n".join(rows)
 
 
 def _inventory(surface: SurfaceSpec, tree: harness_tree.Tree) -> str:
@@ -311,6 +376,11 @@ def _coerce_root_experience_args(args: tuple[Any, ...], kwargs: dict[str, Any]) 
     normalized["ocean"] = str(
         data.get("ocean", _experience_value(experience, "ocean"))
     ).strip()
+    # P3: false only when the lesson was learned entirely in the PSY lane; the
+    # library's cosine gate reads this on reload.
+    normalized["transferable"] = str(
+        data.get("transferable", _experience_value(experience, "transferable") or "true")
+    ).strip().lower()
     if "domain" not in normalized or not normalized["domain"]:
         normalized["domain"] = str(data.get("domain", _experience_value(experience, "domain") or "unknown")).strip()
     if not normalized.get("task_id"):
@@ -366,6 +436,7 @@ def _append_root_experience(*args: Any, **kwargs: Any) -> Path:
             f"- **Cue**: {cue}",
             f"- **Evidence**: {evidence}",
             f"- **Confidence**: {confidence}",
+            f"- **Transferable**: {data.get('transferable', 'true') or 'true'}",
             f"- **Status**: {status}",
             "",
         ]

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Sequence
 
 from .spec import BenchPrompts
 from .tree import PERSONA_CLAUSE_CAP, SurfaceSpec
@@ -504,6 +505,44 @@ Do not diagnose commands, retries, reading order, output paths, budgeting, scrip
 parallel candidate owns procedure; stay on practitioner knowledge."""
 
 
+_PSY_TEMPLATE = """\
+# YOUR DIMENSION: PSY -- how the agent EXPRESSES its behavior
+
+You own expression: tone, pacing, delegation style and verification temperament. You do not add
+procedure, tool mechanics, scripts, hooks or domain facts -- the INV and DOM candidates own those
+lanes. Your test: if the edit would read the same under a different persona, it is not yours.
+
+The behavioral mechanism below was derived from the active profile. It is binding, and it already
+states the direction; your job is to encode the mechanism, not to restate the label:
+
+{levers}
+
+Pick the cheapest place to express it:
+
+- TONE: when a trajectory shows the wrong register -- blunt where warmth was required, chatty
+  where the work needed a terse handover -- add ONE short always-on line about phrasing. Mark
+  voice/persona text with a `## persona:` heading; that section is hard-capped, so cut while you
+  add.
+- PACING: when rollouts stall, overrun or pad, change ordering and budget language -- what to do
+  first, what to leave for the next step -- never the task itself.
+- DELEGATION: route a bounded, large-input/small-output sub-task to a runner in its own context
+  only when the trajectory shows the main context drowning; keep the hand-off line narrow.
+- VERIFICATION TEMPERAMENT: encode how much re-checking and what kind of confirmation the
+  profile asks for. Judgment stays in prose; a check the agent must not skip belongs in a
+  `scripts/<name>.py` step, and that script is INV territory -- describe the trigger here, not the
+  mechanism.
+
+Hard rules:
+- Expression never relaxes a mission rule, widens the task, changes the {deliverable}, or hides a
+  finding. Candor changes HOW a thing is said, never WHETHER it is said.
+- Every edit traces to a moment in a trajectory. Do not rewrite the harness to make it sound like
+  the profile; that spends context and changes nothing observable.
+- Do not copy the compiled persona block. Encode only the mechanism the runs failed to show.
+- This lane never edits an INV or DOM mechanism. If the fix is procedural or factual, leave it
+  for that candidate."""
+
+
+
 def _surface_part(surface_md: str, start: str, end: str | None = None) -> str:
     """An exact span of a SURFACE block, so no pack-specific copy of it can drift."""
     i = surface_md.index(start)
@@ -704,6 +743,32 @@ What makes a skill earn its place:
 {levers}"""
 
 
+_TTS_PSY = """\
+# YOUR DIMENSION: PSYCHOLOGICAL EXPRESSION -- how the agent comes across
+
+You own tone, pacing, delegation style and verification temperament. You do NOT add procedure,
+tool guidance, scripts, sub-agents, hooks or domain facts -- the INVARIANT and DOMAIN editors own
+those, and a PSY edit that reaches into their lanes is off-dimension.
+
+The behavioral mechanism below was derived from the active profile; it is binding:
+
+{levers}
+
+Encode it in the cheapest place that a trajectory actually argues for:
+- TONE -- phrasing and register only. A `## persona:` section is hard-capped, so if you add,
+  cut. Most runs need no tone line at all.
+- PACING -- ordering, brevity and budget language: what to do first, what to leave for later.
+- DELEGATION -- a bounded, large-input/small-output sub-task in its own context, only when the
+  main context is visibly drowning.
+- VERIFICATION TEMPERAMENT -- how much re-checking and which confirmations the profile requires.
+  Judgment stays in prose; a check that must not be skipped belongs in an existing
+  `scripts/*.py` step, not in a new INV mechanism.
+
+Expression never relaxes a rule, widens the task, changes the {deliverable}, or hides a finding.
+Candor changes HOW something is said, never WHETHER it is said. If the fix is procedural or
+factual, it belongs to another dimension -- leave it there."""
+
+
 _TTS_GENERALIZE = """\
 # GENERALIZE, DO NOT MEMORIZE
 
@@ -750,6 +815,31 @@ class _SurfaceText:
     inv: str
     dom: str
     tts_surface: str
+    # P3: the PSY dimension reads the same surface, so its block is shared by
+    # every substrate rather than copied per surface.
+    psy: str = ""
+
+
+# The learnable dimensions and the one-line description each mission uses.
+_DIM_LABEL = {
+    "INV": "the INV dimension (how the agent works)",
+    "DOM": "the DOM dimension (what a practitioner knows)",
+    "PSY": "the PSY dimension (how the agent expresses personality-driven behavior)",
+}
+
+
+def active_dims(bp: BenchPrompts) -> tuple[str, ...]:
+    """The dimensions this run schedules.
+
+    PSY activates only when `psy_levers` is filled — `resolve_prompts` fills it
+    from the active profile, so persona-free runs keep the 2-dimension 4k/3k
+    arithmetic and profile runs earn the 3-dimension 5k/4k arithmetic.
+    """
+    return ("INV", "DOM", "PSY") if bp.psy_levers.strip() else ("INV", "DOM")
+
+
+def _dims_sentence(k: int, dims: Sequence[str]) -> str:
+    return ", ".join(f"{int(k)} on {_DIM_LABEL[d]}" for d in dims)
 
 
 _TTS_SURFACE_HEAD_ZCODE = """\
@@ -942,6 +1032,7 @@ def _build_surface_texts() -> dict[str, _SurfaceText]:
                 "write that trigger line in the same edit.",
             ),
             tts_surface=zc_tts,
+            psy=_PSY_TEMPLATE,
         ),
         "april": _SurfaceText(
             surface_md=_SURFACE_APRIL,
@@ -957,6 +1048,7 @@ def _build_surface_texts() -> dict[str, _SurfaceText]:
                 "trigger: write that trigger line in the same edit.",
             ),
             tts_surface=apr_tts,
+            psy=_PSY_TEMPLATE,
         ),
         "opencode": _SurfaceText(
             surface_md=_SURFACE_OPENCODE,
@@ -971,6 +1063,7 @@ def _build_surface_texts() -> dict[str, _SurfaceText]:
                 "trigger line in the same edit.",
             ),
             tts_surface=oc_tts,
+            psy=_PSY_TEMPLATE,
         ),
         "codex": _SurfaceText(
             surface_md=_SURFACE_CODEX,
@@ -985,6 +1078,7 @@ def _build_surface_texts() -> dict[str, _SurfaceText]:
                 "that trigger line in the same edit.",
             ),
             tts_surface=cx_tts,
+            psy=_PSY_TEMPLATE,
         ),
     }
 
@@ -1031,11 +1125,22 @@ def _persona_part(bp: BenchPrompts) -> str:
 
 def _tts_propose(bp: BenchPrompts, dim: str, st: _SurfaceText, *, k: int, index: int) -> str:
     """propose(), in the tts pack's words."""
-    block = (_TTS_INV if dim == "INV" else _TTS_DOM).format(
-        deliverable=bp.deliverable_word,
-        domain=bp.domain_word,
-        levers=(bp.inv_levers if dim == "INV" else bp.dom_levers).strip(),
-    )
+    if dim == "PSY":
+        block = st.psy.format(
+            deliverable=bp.deliverable_word,
+            domain=bp.domain_word,
+            levers=bp.psy_levers.strip(),
+        )
+        # The shared PSY block is written for the adapt pack; swap its framing to
+        # the tts pack's dimension names without a second copy of the rules.
+        role = "PSYCHOLOGICAL EXPRESSION"
+    else:
+        block = (_TTS_INV if dim == "INV" else _TTS_DOM).format(
+            deliverable=bp.deliverable_word,
+            domain=bp.domain_word,
+            levers=(bp.inv_levers if dim == "INV" else bp.dom_levers).strip(),
+        )
+        role = "INVARIANT" if dim == "INV" else "DOMAIN"
     where = (
         "Do not hedge toward an average or try to cover every base -- commit to the single "
         "most defensible version of your dimension. A later stage compares and merges."
@@ -1046,7 +1151,7 @@ def _tts_propose(bp: BenchPrompts, dim: str, st: _SurfaceText, *, k: int, index:
             f"the same evidence and never shown the others. "
         ) + where
     parts = [
-        f"You are the {'INVARIANT' if dim == 'INV' else 'DOMAIN'} harness editor for one "
+        f"You are the {role} harness editor for one "
         f"task in this {bp.domain_word}. You have the CURRENT real task, FULL rollouts of "
         f"it under the current (base) harness, the current harness files, and this area's "
         f"library of what was adopted for earlier tasks.",
@@ -1069,7 +1174,15 @@ def _tts_propose(bp: BenchPrompts, dim: str, st: _SurfaceText, *, k: int, index:
 
 def _tts_aggregate(bp: BenchPrompts, st: _SurfaceText, *, k: int, index: int) -> str:
     """aggregate(), in the tts pack's words."""
-    n = 2 * k
+    dims = active_dims(bp)
+    n = len(dims) * k
+    psy_block = (
+        "PSY candidates change EXPRESSION -- tone, pacing, delegation style or verification "
+        "temperament. Judge them by whether their rollout shows the behavior, not by whether the "
+        "text asserts it; a PSY edit that relaxes a rule or changes the deliverable is a defect.\n\n"
+        if "PSY" in dims
+        else ""
+    )
     parts = [
         "You are the integration judge and synthesizer. What you emit is what gets ADOPTED: it "
         "runs on this task, and if selected it enters this area's library where later tasks read "
@@ -1079,9 +1192,8 @@ def _tts_aggregate(bp: BenchPrompts, st: _SurfaceText, *, k: int, index: int) ->
         _lens(bp),
         f"# WHAT YOU HAVE\n\n"
         f"{k} rollout{'s' if k > 1 else ''} of this task under the unmodified (base) harness, "
-        f"and {n} dimension-scoped candidate harnesses built on that same base -- {k} on the "
-        f"INVARIANT dimension (tool and procedure machinery) and {k} on the DOMAIN dimension "
-        f"(what a professional in this field knows). Each candidate was rolled out ONCE and you "
+        f"and {n} dimension-scoped candidate harnesses built on that same base -- "
+        f"{_dims_sentence(k, dims)}. Each candidate was rolled out ONCE and you "
         f"have that rollout. All of it is in your workspace:\n\n"
         f"    context/task.md               the real task\n"
         f"    context/harness/              the base harness files, and the tree you edit\n"
@@ -1093,15 +1205,16 @@ def _tts_aggregate(bp: BenchPrompts, st: _SurfaceText, *, k: int, index: int) ->
         f"                                  and `produced.md` (what its rollout delivered)\n"
         f"    context/library/              earlier tasks' adopted harnesses (browse INDEX.md)\n\n"
         f"Open what each side PRODUCED, not only its trajectory: judging an edit without reading "
-        f"its product is guessing.",
-        "# YOUR JOB\n\n"
+        f"its product is guessing.\n\n"
+        f"{psy_block}"
+        f"# YOUR JOB\n\n"
         "1. Judge each candidate edit from the evidence: did its rollout show it helped, hurt, "
         "or did nothing versus the base rollouts? The task's user request is the yardstick -- "
         "completeness against what was asked counts as much as correctness of what was "
         "produced. An edit whose skill was never loaded or whose rule was ignored changed "
         "nothing, whatever it says on paper.\n"
         "2. Synthesize ONE final harness containing only what the evidence supports: merge the "
-        "good parts of both dimensions, resolve overlaps rather than concatenating, keep "
+        "good parts of every dimension, resolve overlaps rather than concatenating, keep "
         "always-on text tiny, and keep every retained skill's trigger line narrow. Adopting a "
         "single candidate wholesale is valid when it is simply the best state.\n\n"
         "KEEPING THE BASE UNCHANGED IS A VALID OUTCOME -- if no candidate demonstrably improved "
@@ -1190,18 +1303,32 @@ def propose(
     index: int = 1,
     round_t: int | None = None,
 ) -> str:
-    """The job for one INV or DOM candidate. `round_t` set => sequential mode, pass t."""
-    if dim not in ("INV", "DOM"):
-        raise ValueError(f"unknown proposal dimension {dim!r}; expected 'INV' or 'DOM'")
+    """The job for one INV, DOM or PSY candidate. `round_t` set => sequential mode, pass t."""
+    if dim not in ("INV", "DOM", "PSY"):
+        raise ValueError(
+            f"unknown proposal dimension {dim!r}; expected 'INV', 'DOM' or 'PSY'"
+        )
+    if dim == "PSY" and not bp.psy_levers.strip():
+        raise ValueError(
+            "PSY needs psy_levers: the dimension exists only while a profile is active, "
+            "so a persona-free run must never schedule it"
+        )
     st = _st(surface)
 
     if bp.prompt_pack == "tts" and round_t is None:
         return _tts_propose(bp, dim, st, k=k, index=index)
-    block = (st.inv if dim == "INV" else st.dom).format(
-        deliverable=bp.deliverable_word,
-        domain=bp.domain_word,
-        levers=(bp.inv_levers if dim == "INV" else bp.dom_levers).strip(),
-    )
+    if dim == "PSY":
+        block = st.psy.format(
+            deliverable=bp.deliverable_word,
+            domain=bp.domain_word,
+            levers=bp.psy_levers.strip(),
+        )
+    else:
+        block = (st.inv if dim == "INV" else st.dom).format(
+            deliverable=bp.deliverable_word,
+            domain=bp.domain_word,
+            levers=(bp.inv_levers if dim == "INV" else bp.dom_levers).strip(),
+        )
     where = (
         f"You are candidate {index} of {k} on this dimension, drawn independently from the "
         f"same evidence."
@@ -1253,11 +1380,28 @@ def propose(
 
 
 def aggregate(bp: BenchPrompts, surface: SurfaceSpec | str, *, k: int = 1, index: int = 1) -> str:
-    """agg-k: compose ONE final from all base evidence and all 2k candidates."""
+    """agg-k: compose ONE final from all base evidence and all dimension candidates."""
     st = _st(surface)
     if bp.prompt_pack == "tts":
         return _tts_aggregate(bp, st, k=k, index=index)
-    n = 2 * k
+    dims = active_dims(bp)
+    n = len(dims) * k
+    merge_line = (
+        "- MERGE across candidates -- the expected outcome when an INV edit, a DOM edit and a PSY "
+        "edit each earn their place. Resolve the overlaps rather than concatenating.\n"
+        if "PSY" in dims
+        else "- MERGE across candidates -- the expected outcome when an INV edit and a DOM edit each "
+        "earn their place. Resolve the overlaps rather than concatenating.\n"
+    )
+    psy_block = (
+        "# PSY CANDIDATES\n\n"
+        "A PSY candidate changes EXPRESSION -- tone, pacing, delegation style or verification "
+        "temperament. Judge it by whether its rollout SHOWS that behavior, never by whether its "
+        "text states it. A PSY edit that relaxes a rule, widens the task or changes the "
+        f"{bp.deliverable_word} is a defect, however well it reads.\n\n"
+        if "PSY" in dims
+        else ""
+    )
     return _tidy(
         "\n\n".join(
             [
@@ -1269,12 +1413,12 @@ def aggregate(bp: BenchPrompts, surface: SurfaceSpec | str, *, k: int = 1, index
                 _lens(bp),
                 f"# WHAT YOU HAVE\n\n"
                 f"{k} rollout{'s' if k > 1 else ''} under the unmodified harness, and {n} candidate "
-                f"harnesses -- {k} on the INV dimension (how the agent works) and {k} on the DOM "
-                f"dimension (what a practitioner knows). Each candidate was rolled out ONCE and you "
+                f"harnesses -- {_dims_sentence(k, dims)}. Each candidate was rolled out ONCE and you "
                 f"have that rollout.\n\n"
                 f"The candidates were sampled separately but share the same task, evidence and likely "
                 f"model biases. Agreement is support, not independent proof; contradiction is a reason "
                 f"to inspect the trajectories, not to vote.",
+                psy_block,
                 f"# HOW TO WEIGH THE EVIDENCE\n\n"
                 f"The {k} base rollout{'s are' if k > 1 else ' is'} draws from ONE distribution -- "
                 f"read them as a set, not as {k} separate stories.\n\n"
@@ -1292,9 +1436,7 @@ def aggregate(bp: BenchPrompts, surface: SurfaceSpec | str, *, k: int = 1, index
                 f"overwhelming. Never merge an edit from a non-delivering rollout without stating "
                 f"why.",
                 "# YOUR JOB\n\nCompose ONE harness. All of these are valid, judged only on what the "
-                "rollouts support:\n"
-                "- MERGE across candidates -- the expected outcome when an INV edit and a DOM edit each "
-                "earn their place. Resolve the overlaps rather than concatenating.\n"
+                "rollouts support:\n" + merge_line +
                 "- ADOPT ONE WHOLESALE if a single candidate is simply the best state.\n"
                 "- KEEP_BASE.\n\n" + _KEEP_BASE,
                 (
@@ -1328,6 +1470,15 @@ def compose_round(bp: BenchPrompts, surface: SurfaceSpec | str, *, t: int, k: in
     """seq-k: compose checkpoint C_t from this round's candidates and every earlier round."""
     st = _st(surface)
     final = t >= k
+    dims = active_dims(bp)
+    round_candidates = "INV, DOM and PSY" if "PSY" in dims else "INV and DOM"
+    psy_note = (
+        "\n\nA PSY candidate changes EXPRESSION -- tone, pacing, delegation style or verification "
+        "temperament. Keep it only when this round's rollout shows the behavior; a PSY edit that "
+        "relaxes a rule or changes the deliverable is a defect."
+        if "PSY" in dims
+        else ""
+    )
     return _tidy(
         "\n\n".join(
             [
@@ -1336,16 +1487,17 @@ def compose_round(bp: BenchPrompts, surface: SurfaceSpec | str, *, t: int, k: in
                 _lens(bp),
                 "# WHAT YOU HAVE\n\n"
                 "The rollouts under the unmodified harness (the shared evidence, which does not change "
-                "between rounds), this round's INV and DOM candidates with their rollouts, and every "
-                "earlier round's candidates, checkpoints and trajectories. The previous checkpoint's "
-                "own rollout is this round's on-policy evidence: it shows what the harness you are "
-                "editing actually does."
+                f"between rounds), this round's {round_candidates} candidates with their rollouts, and "
+                "every earlier round's candidates, checkpoints and trajectories. The previous "
+                "checkpoint's own rollout is this round's on-policy evidence: it shows what the "
+                "harness you are editing actually does."
                 + (
                     "\n\nThis is the FIRST round, so the only evidence is the base rollouts and this "
-                    "round's two candidates."
+                    f"round's {round_candidates} candidates."
                     if t == 1
                     else ""
-                ),
+                )
+                + psy_note,
                 "# YOUR JOB\n\n"
                 + (
                     "Compose THE FINAL harness, from the WHOLE history rather than just this round.\n"

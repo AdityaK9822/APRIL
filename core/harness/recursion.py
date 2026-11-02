@@ -14,8 +14,10 @@
 
 """Parallel and sequential task-level recursion.
 
-Each mode schedules 4k rollouts and 3k improvement stages, including shared base
-executions. Invalid proposals receive one retry before inheriting the current harness.
+Each mode schedules (2 + n_dims)·k rollouts and (n_dims + 1)·k improvement stages,
+including shared base executions: n_dims = 2 (INV + DOM) is the standing 4k/3k
+arithmetic; adding PSY gives n_dims = 3 and the 5k/4k arithmetic. Invalid
+proposals receive one retry before inheriting the current harness.
 """
 
 from __future__ import annotations
@@ -81,6 +83,7 @@ class ModeResult:
             "mode": self.mode,
             "task_id": self.task_id,
             "k": self.k,
+            "n_dims": self.ledger.n_dims if self.ledger else None,
             "finals": self.finals,
             "ok": self.ok,
             "fell_back": self.fell_back,
@@ -358,19 +361,23 @@ def run_parallel(
     propose_workers: int = PHASE_WIDTH,
     rollout_workers: int = PHASE_WIDTH,
 ) -> ModeResult:
-    """WIDTH: 2k iid candidates from shared evidence, then k INDEPENDENT compositions."""
+    """WIDTH: n_dims·k iid candidates from shared evidence, then k INDEPENDENT compositions."""
+    benchmark_prompts = resolve_prompts(adapter, task_id)
+    dims = prompts.active_dims(benchmark_prompts)
     surface = adapter.substrate.surface()
-    ledger = Ledger(mode="agg", task_id=task_id, k=k)
+    ledger = Ledger(mode="agg", task_id=task_id, k=k, n_dims=len(dims))
     for r in base:
         ledger.rollout(r.label)
     result = ModeResult(mode="agg", task_id=task_id, k=k, ledger=ledger)
     result.rollouts.update({r.label: r for r in base})
     ctx_dir = work_dir / "context"
-    benchmark_prompts = resolve_prompts(adapter, task_id)
     base_dir = harness_tree.write_tree(surface, base_tree, work_dir / "harnesses" / "base")
 
-    specs = [(f"{d.lower()}{i}", d, i) for i in range(1, k + 1) for d in ("INV", "DOM")]
-    with ThreadPoolExecutor(max_workers=min(len(specs), propose_workers)) as pool_x:
+    specs = [(f"{d.lower()}{i}", d, i) for i in range(1, k + 1) for d in dims]
+    # Phase width is bounded by the dimension count and PHASE_WIDTH: adding PSY
+    # widens the candidate set, not the number of concurrent sessions.
+    phase_width = max(1, min(len(dims), propose_workers))
+    with ThreadPoolExecutor(max_workers=phase_width) as pool_x:
         stages = list(
             pool_x.map(
                 lambda s: _run_stage(
@@ -468,14 +475,15 @@ def run_sequential(
     rollout_workers: int = PHASE_WIDTH,
 ) -> ModeResult:
     """DEPTH: k nested passes over the same shared base evidence."""
+    benchmark_prompts = resolve_prompts(adapter, task_id)
+    dims = prompts.active_dims(benchmark_prompts)
     surface = adapter.substrate.surface()
-    ledger = Ledger(mode="seq", task_id=task_id, k=k)
+    ledger = Ledger(mode="seq", task_id=task_id, k=k, n_dims=len(dims))
     for r in base:
         ledger.rollout(r.label)
     result = ModeResult(mode="seq", task_id=task_id, k=k, ledger=ledger)
     result.rollouts.update({r.label: r for r in base})
     ctx_dir = work_dir / "context"
-    benchmark_prompts = resolve_prompts(adapter, task_id)
 
     current_harness = dict(base_tree)
     history: list[tuple[str, Path, RunView | None]] = []
@@ -484,8 +492,8 @@ def run_sequential(
         current_dir = harness_tree.write_tree(
             surface, current_harness, work_dir / "harnesses" / current_label
         )
-        specs = [(f"inv{t}", "INV"), (f"dom{t}", "DOM")]
-        with ThreadPoolExecutor(max_workers=min(2, propose_workers)) as pool_x:
+        specs = [(f"{d.lower()}{t}", d) for d in dims]
+        with ThreadPoolExecutor(max_workers=min(len(specs), propose_workers)) as pool_x:
             stages = list(
                 pool_x.map(
                     lambda s: _run_stage(

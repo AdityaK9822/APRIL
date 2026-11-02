@@ -15,11 +15,12 @@
 """Namespacing, the seeded stream order, and the drivers: one task, one domain, a sweep.
 
 `ns()` is the only function that builds a run namespace; `Namespace` is the only thing that
-globs over one. Scheme: <bench>-<substrate>-<mode><k>[-s<seed>][-<tag>].
+globs over one. Scheme: <bench>-<substrate>-<mode><k>[-P<persona>][-s<seed>][-<tag>].
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import random
@@ -27,7 +28,7 @@ import re
 import traceback
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as dataclass_replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -83,7 +84,7 @@ def _modes_of(record: Mapping) -> dict:
 
 @dataclass(frozen=True)
 class Namespace:
-    """Every name for one (benchmark, substrate, mode, k, seed, tag) setting."""
+    """Every name for one (benchmark, substrate, mode, k, persona, seed, tag) setting."""
 
     benchmark: str
     substrate: str
@@ -91,9 +92,18 @@ class Namespace:
     k: int
     seed: int | None = None
     tag: str = ""
+    persona: str = ""
 
     def __str__(self) -> str:
-        return ns(self.benchmark, self.substrate, self.mode, self.k, seed=self.seed, tag=self.tag)
+        return ns(
+            self.benchmark,
+            self.substrate,
+            self.mode,
+            self.k,
+            seed=self.seed,
+            tag=self.tag,
+            persona=self.persona,
+        )
 
     def run_id(self, task_id: str, label: str) -> str:
         return f"{self}/{task_id}/{label}"
@@ -103,13 +113,31 @@ class Namespace:
 
     @classmethod
     def glob(cls, benchmark: str, substrate: str, k: int, *, mode: str = "*") -> tuple[str, str]:
-        """The only glob over namespaces; both patterns match seeded, tagged and bare forms."""
+        """The only glob over namespaces; both patterns match seeded, tagged, persona
+        and bare forms."""
         base = f"{benchmark}-{substrate}-{mode}{int(k)}"
         return base, f"{base}-*"
 
 
+def _validate_persona(persona: str) -> None:
+    if not persona:
+        return
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]*", persona):
+        raise ValueError(
+            f"persona {persona!r} must be [A-Za-z0-9_.-] with no leading '-' or '.': "
+            f"it becomes a path segment and a run-id segment"
+        )
+
+
 def ns(
-    benchmark: str, substrate: str, mode: str, k: int, *, seed: int | None = None, tag: str = ""
+    benchmark: str,
+    substrate: str,
+    mode: str,
+    k: int,
+    *,
+    seed: int | None = None,
+    tag: str = "",
+    persona: str = "",
 ) -> str:
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}; the method has exactly two: {MODES}")
@@ -119,7 +147,10 @@ def ns(
             "let the two substrates' caches collide on every label"
         )
     validate_tag(tag)
+    _validate_persona(persona)
     out = f"{benchmark}-{substrate}-{mode}{int(k)}"
+    if persona:
+        out += f"-P{persona}"
     if seed is not None:
         out += f"-s{int(seed)}"
     if tag:
@@ -206,6 +237,7 @@ def _restore_libraries(
     modes: Sequence[str],
     seed: int | None,
     tag: str,
+    persona: str,
     libraries: dict[str, library_store.Library],
     selections: dict,
 ) -> None:
@@ -222,7 +254,9 @@ def _restore_libraries(
             or not library_store.has_experience(sel.get("experience"))
         ):
             continue
-        n = Namespace(adapter.spec.name, adapter.substrate.name, mode, k, seed, tag)
+        n = Namespace(
+            adapter.spec.name, adapter.substrate.name, mode, k, seed, tag, persona
+        )
         tree = harness_tree.read_tree(surface, n.task_dir(runs_root, task_id) / "harnesses" / label)
         if not tree:
             continue
@@ -242,6 +276,7 @@ class TaskResult:
     domain: str
     k: int
     seed: int | None = None
+    persona: str = ""
     status: str = "running"
     modes: dict = field(default_factory=dict)
     selections: dict = field(default_factory=dict)
@@ -254,6 +289,7 @@ class TaskResult:
             "domain": self.domain,
             "k": self.k,
             "seed": self.seed,
+            "persona": self.persona,
             "status": self.status,
             "base": self.base,
             "modes": self.modes,
@@ -356,6 +392,7 @@ def _resume(
     modes: Sequence[str],
     seed: int | None,
     tag: str,
+    persona: str,
     mode_libs: dict[str, library_store.Library],
     res: TaskResult,
 ) -> bool:
@@ -389,7 +426,9 @@ def _resume(
         return False
     for mode in modes:
         sel = cached_sels[mode]
-        namespace = Namespace(adapter.spec.name, adapter.substrate.name, mode, k, seed, tag)
+        namespace = Namespace(
+            adapter.spec.name, adapter.substrate.name, mode, k, seed, tag, persona
+        )
         harness_dir = namespace.task_dir(runs_root, task_id) / "harnesses" / sel["chosen_label"]
         run_dir = Path(sel.get("chosen_run_dir") or "")
         try:
@@ -417,7 +456,9 @@ def _resume(
     res.modes = cached_modes
     res.selections = cached_sels
     res.errors = got.get("errors", [])
-    _restore_libraries(task_id, k, adapter, runs_root, modes, seed, tag, mode_libs, res.selections)
+    _restore_libraries(
+        task_id, k, adapter, runs_root, modes, seed, tag, persona, mode_libs, res.selections
+    )
     return True
 
 
@@ -535,6 +576,7 @@ def _run_one_mode(
             prop=selector,
             work_dir=work_dir,
             decisions={stage.label: stage.notes or stage.error for stage in r.stages},
+            stage_dims={stage.label: stage.dim for stage in r.stages},
         )
     d = sel.to_dict()
     d["chosen_run_dir"] = str(
@@ -602,14 +644,15 @@ def run_task(
     bench, sub = adapter.spec.name, adapter.substrate.name
 
     domain = adapter.domain_of(task_id)
-    res = TaskResult(task_id=task_id, domain=domain, k=k, seed=seed)
-    base_ns = Namespace(bench, sub, "agg", k, seed, tag)
+    persona = str(getattr(adapter.spec, "profile", "") or "").strip()
+    res = TaskResult(task_id=task_id, domain=domain, k=k, seed=seed, persona=persona)
+    base_ns = Namespace(bench, sub, "agg", k, seed, tag, persona)
     work = base_ns.task_dir(runs_root, task_id)
     work.mkdir(parents=True, exist_ok=True)
     summary_path = work / "summary.json"
 
     if summary_path.is_file() and _resume(
-        summary_path, task_id, k, adapter, runs_root, modes, seed, tag, mode_libs, res
+        summary_path, task_id, k, adapter, runs_root, modes, seed, tag, persona, mode_libs, res
     ):
         return res
 
@@ -633,7 +676,7 @@ def run_task(
         return res
 
     for mode in modes:
-        n = Namespace(bench, sub, mode, k, seed, tag)
+        n = Namespace(bench, sub, mode, k, seed, tag, persona)
         try:
             _run_one_mode(
                 mode,
@@ -684,7 +727,12 @@ def run_domain(
     """Every task in one domain, in `stream_order()` order, threading the library forward."""
     surface = adapter.substrate.surface()
     libs = {
-        mode: library_store.Library(root=Path(library_root) / mode, domain=domain, surface=surface)
+        mode: library_store.Library(
+            root=Path(library_root) / mode,
+            domain=domain,
+            surface=surface,
+            profile=str(getattr(adapter.spec, "profile", "") or "").strip(),
+        )
         for mode in modes
     }
     out = {
@@ -777,6 +825,20 @@ def task_stream(
     return dict(ordered_tasks)
 
 
+def _adapter_with_profile(adapter: BenchmarkAdapter, profile: str) -> BenchmarkAdapter:
+    """A shallow adapter copy whose spec names `profile`; the adapter itself is stateless.
+
+    Profiles are data: switching one changes the spec's `profile` field and nothing
+    else, which is what makes the PSY axis scale without code edits.
+    """
+    clone = copy.copy(adapter)
+    try:
+        clone.spec = dataclass_replace(adapter.spec, profile=str(profile))
+    except (TypeError, AttributeError):
+        clone.spec = adapter.spec
+    return clone
+
+
 def run_sweep(
     k: int,
     *,
@@ -794,8 +856,55 @@ def run_sweep(
     pool_policy: str = "finals",
     max_tasks: int | None = None,
     only_tasks: Sequence[str] = (),
+    profiles: Sequence[str] = (),
 ) -> dict:
-    """Run domains concurrently, preserving task order after stream filters are applied."""
+    """Run domains concurrently, preserving task order after stream filters are applied.
+
+    `profiles` fans the same sweep over committed persona profiles (P3): each
+    profile gets its own adapter spec, its own namespace segment (`-P<id>`) and
+    its own library root, so personas never share lessons by accident. An empty
+    `profiles` keeps the single-run behaviour unchanged.
+    """
+    if profiles:
+        sections: dict[str, dict] = {}
+        for profile in profiles:
+            sections[str(profile)] = run_sweep(
+                k,
+                adapter=_adapter_with_profile(adapter, profile),
+                prop=prop,
+                runs_root=Path(runs_root),
+                library_root=Path(library_root) / str(profile),
+                split=split,
+                modes=modes,
+                seed=seed,
+                tag=tag,
+                domain_parallel=domain_parallel,
+                only_domains=only_domains,
+                selector_prop=selector_prop,
+                pool_policy=pool_policy,
+                max_tasks=max_tasks,
+                only_tasks=only_tasks,
+                profiles=(),
+            )
+        return {
+            "benchmark": adapter.spec.name,
+            "substrate": adapter.substrate.name,
+            "k": k,
+            "modes": list(modes),
+            "seed": seed,
+            "tag": tag,
+            "profiles": [str(p) for p in profiles],
+            "n_dims": 3,
+            "library_root": str(library_root),
+            "started_at": min(
+                (s.get("started_at", "") for s in sections.values()), default=""
+            ),
+            "finished_at": max(
+                (s.get("finished_at", "") for s in sections.values()), default=""
+            ),
+            "results": sections,
+        }
+
     ordered_tasks = task_stream(
         adapter,
         split=split,
@@ -840,6 +949,8 @@ def run_sweep(
         "modes": list(modes),
         "seed": seed,
         "tag": tag,
+        "profiles": [],
+        "library_root": str(library_root),
         "domain_order": order,
         "max_tasks": max_tasks,
         "only_tasks": list(only_tasks),
@@ -866,6 +977,7 @@ def run_sweep_zcode(
     pool_policy: str = "finals",
     prop: Proposer | None = None,
     selector_prop: Proposer | None = None,
+    profiles: Sequence[str] = (),
 ) -> dict:
     """The first full sweep on the zcode substrate (P1-1.6): the zcode adapter, the
     proposer on `claude_cli`, everything else `run_sweep` semantics.
@@ -900,4 +1012,5 @@ def run_sweep_zcode(
         max_tasks=max_tasks,
         pool_policy=pool_policy,
         selector_prop=selector_prop if selector_prop is not None else prop,
+        profiles=profiles,
     )

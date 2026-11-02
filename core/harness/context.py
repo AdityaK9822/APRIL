@@ -121,12 +121,34 @@ def copy_source(adapter: Any, task_id: Any, root: Path) -> int:
         src = src_fn(task_id)
     except Exception:
         return 0
-    if not src or not Path(src).is_dir():
+    if not src:
+        return 0
+    dst = root / "source"
+    leak_globs = _attr(_spec(adapter), "leak_globs", ())
+
+    # Two adapter shapes: a directory on disk (a benchmark's task folder) and an
+    # inline fixture mapping (the authored mini-tasks). Both land in `source/`
+    # so the proposer's evidence tree has the same shape either way.
+    if isinstance(src, Mapping):
+        src_n = 0
+        for rel, content in src.items():
+            rel = str(rel).lstrip("./")
+            if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+                continue
+            if leak_globs and any(
+                fnmatch.fnmatch(rel, str(g).lstrip("./")) for g in leak_globs
+            ):
+                continue
+            t = dst / rel
+            t.parent.mkdir(parents=True, exist_ok=True)
+            t.write_text(str(content), encoding="utf-8")
+            src_n += 1
+        return src_n
+
+    if not Path(src).is_dir():
         return 0
     src = Path(src)
-    dst = root / "source"
     src_n = 0
-    leak_globs = _attr(_spec(adapter), "leak_globs", ())
     for f in sorted(src.rglob("*")):
         if not f.is_file() or "__pycache__" in f.parts:
             continue

@@ -23,10 +23,11 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence, TypeVar
+from typing import Callable, Mapping, Sequence, TypeVar
 
 from . import context
 from . import prompts as P
+from . import tree as harness_tree
 from .proposer import Proposer, ProposerError
 from .spec import BenchmarkAdapter, BenchPrompts, RunView, resolve_prompts
 
@@ -248,6 +249,9 @@ def _fallback(sel: Selection, pool: dict[str, RunView], pool_kind: str, exc: Exc
         return False
     sel.chosen_id = next((a for a, label in sel.id_map.items() if label == sel.chosen_label), "")
     sel.fallback = True
+    # A neutral fallback IS a selection: the artifact is scored and the mode can
+    # finish. Only the failure to find any usable candidate is a non-selection.
+    sel.ok = True
     sel.error = str(exc)[:400]
     return True
 
@@ -399,6 +403,82 @@ def trivial_selection(
     return sel
 
 
+def edit_attribution(
+    registry: Any,
+    base_tree: harness_tree.Tree,
+    trees_by_label: dict[str, harness_tree.Tree],
+    stage_dims: Mapping[str, str],
+) -> dict[str, dict]:
+    """Attribute each changed component to the dimension(s) that changed it.
+
+    `ComponentRegistry.diff` says WHICH components moved; `stage_dims` says which
+    learnable dimension produced each candidate. Intersecting them is how a PSY
+    edit is kept separable from an INV or DOM edit after a run, without the
+    selector ever seeing the dimension (selection has already finished by here).
+    """
+    out: dict[str, dict] = {}
+    for label, tree in trees_by_label.items():
+        dim = str(stage_dims.get(label, "")).upper()
+        if not dim:
+            continue
+        try:
+            diff = registry.diff(base_tree, tree)
+        except Exception:
+            continue
+        for component, change in diff.items():
+            if not (change.get("added") or change.get("removed") or change.get("modified")):
+                continue
+            rec = out.setdefault(component, {"dims": set(), "candidates": set()})
+            rec["dims"].add(dim)
+            rec["candidates"].add(label)
+            for key in ("added", "removed", "modified"):
+                if change.get(key):
+                    rec.setdefault(key, set()).update(change[key])
+    return {
+        component: {
+            key: sorted(value) if isinstance(value, set) else value
+            for key, value in rec.items()
+        }
+        for component, rec in out.items()
+    }
+
+
+def lesson_transferable(edit_dims: dict[str, dict] | None) -> bool:
+    """Whether a lesson climbs out of its persona.
+
+    A lesson whose changed components all came from the PSY lane is
+    persona-specific and must not leak into another persona's library without
+    passing the cosine gate; anything touching INV or DOM transfers normally.
+    """
+    dims_seen = sorted(
+        {str(d).upper() for rec in (edit_dims or {}).values() for d in rec.get("dims", [])}
+    )
+    return not (dims_seen == ["PSY"])
+
+
+def _annotate_edits(
+    edits_text: str, stage_dims: Mapping[str, str]
+) -> str:
+    """Add a `dimensions:` line after each `candidates:` row in the edit record."""
+    if not edits_text or not stage_dims:
+        return edits_text
+    annotated: list[str] = []
+    for line in edits_text.splitlines():
+        annotated.append(line)
+        if line.strip().lower().startswith("candidates:"):
+            labels = [
+                part.strip().strip("`")
+                for part in line.split(":", 1)[1].split(",")
+                if part.strip()
+            ]
+            dims = sorted(
+                {str(stage_dims[label]).upper() for label in labels if label in stage_dims}
+            )
+            if dims:
+                annotated.append(f"dimensions: {', '.join(dims)}")
+    return "\n".join(annotated).strip()
+
+
 def reflect_adoption(
     task_id: str,
     sel: Selection,
@@ -408,6 +488,7 @@ def reflect_adoption(
     prop: Proposer,
     work_dir: Path,
     decisions: dict[str, str] | None = None,
+    stage_dims: Mapping[str, str] | None = None,
 ) -> dict:
     """Learn from harness edits, decisions, trajectories, and deliverables after adoption."""
     chosen = candidates.get(sel.chosen_label)
@@ -443,8 +524,37 @@ def reflect_adoption(
     )
     context.assert_no_leak_paths(root, adapter.spec.leak_globs)
     context.assert_no_grader_verdicts(root)
+
+    # P3: attribute component edits to the dimension that produced them. The
+    # registry dependency is lazy and optional: a partial checkout still reflects.
+    edit_dims: dict[str, dict] = {}
+    if stage_dims:
+        try:
+            from core.components.base import default_registry
+
+            surface = adapter.substrate.surface()
+            base_tree = harness_tree.read_tree(surface, adapter.base_harness())
+            trees: dict[str, harness_tree.Tree] = {}
+            for label in stage_dims:
+                tree = harness_tree.read_tree(surface, harnesses / label)
+                if tree:
+                    trees[label] = tree
+            edit_dims = edit_attribution(
+                default_registry(), base_tree, trees, stage_dims
+            )
+        except Exception:
+            edit_dims = {}
+
     experience = _distil(
-        task_id, sel, candidates, adapter=adapter, prop=prop, root=root, layout=evidence.layout
+        task_id,
+        sel,
+        candidates,
+        adapter=adapter,
+        prop=prop,
+        root=root,
+        layout=evidence.layout,
+        stage_dims=stage_dims or {},
+        edit_dims=edit_dims,
     )
     sel.experience = experience
     _persist(sel, Path(work_dir) / "selection" / f"{sel.mode}{sel.k}", str(chosen.run_dir))
@@ -461,6 +571,8 @@ def _distil(
     root: Path,
     bp: BenchPrompts | None = None,
     layout: str = "",
+    stage_dims: Mapping[str, str] | None = None,
+    edit_dims: dict[str, dict] | None = None,
 ) -> dict:
     """Extract a supported lesson from the complete task-local improvement record."""
     mission = "\n\n".join(
@@ -485,8 +597,9 @@ def _distil(
         return {}
     sel.usd += reply.cost_usd
     edits = _EDITS.search(reply.text)
-    if edits:
-        (root / "edits.md").write_text(edits.group(1).strip() + "\n", encoding="utf-8")
+    edits_text = _annotate_edits(edits.group(1).strip(), stage_dims or {}) if edits else ""
+    if edits_text:
+        (root / "edits.md").write_text(edits_text + "\n", encoding="utf-8")
     m = _EXP.search(reply.text)
     if not m:
         return {}
@@ -499,8 +612,14 @@ def _distil(
                 out[key] = val.strip()
     if not all(out.get(key) for key in ("cue", "lesson", "evidence")):
         return {}
-    if edits:
-        out["edits"] = edits.group(1).strip()
+    if edits_text:
+        out["edits"] = edits_text
+    # P3: an edit record whose changed components all came from the PSY lane is
+    # persona-specific, so it is marked non-transferable for the library's
+    # cosine gate; anything touching INV or DOM stays transferable.
+    out["transferable"] = lesson_transferable(edit_dims)
+    if edit_dims:
+        out["edit_dims"] = edit_dims
     # P2: run facts, not model claims — the persona this lesson was distilled
     # under and its compact ocean vector ("O70 C90 E45 A88 N20"). Library
     # entries carry them; P3's transfer gate ranks lessons by cosine

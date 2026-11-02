@@ -57,12 +57,25 @@ class Entry:
 
 @dataclass
 class Ledger:
-    """Everything one mode spent on one task, recorded as it happens."""
+    """Everything one mode spent on one task, recorded as it happens.
+
+    `n_dims` is the number of learnable dimensions this mode scheduled: 2 for
+    INV + DOM, 3 once PSY is active (a profile-backed run). It is carried on the
+    ledger so `assert_identity` and the summary use the same arithmetic instead
+    of re-deriving the dimension count at each call site.
+    """
 
     mode: str
     task_id: str
     k: int
+    n_dims: int = 2
     entries: list[Entry] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.n_dims not in (2, 3):
+            raise ValueError(
+                f"Ledger.n_dims must be 2 (INV+DOM) or 3 (INV+DOM+PSY), got {self.n_dims!r}"
+            )
 
     def rollout(self, label: str, usd: float = 0.0, *, cached: bool = False) -> None:
         self.entries.append(Entry("rollout", label, usd, cached))
@@ -100,7 +113,10 @@ class Ledger:
         P=(n_dims+1)·k (default n_dims=2: R=4k, P=3k) with no duplicate label.
         Duplicates are checked before the counts, because a duplicate can satisfy them.
         """
-        want_r, want_p = expected_rollouts(self.k), expected_sessions(self.k)
+        want_r, want_p = (
+            expected_rollouts(self.k, self.n_dims),
+            expected_sessions(self.k, self.n_dims),
+        )
         rl, sl = self.labels("rollout"), self.labels("session")
         dupes = sorted(
             {label for label in rl if rl.count(label) > 1}
@@ -127,13 +143,14 @@ class Ledger:
             "mode": self.mode,
             "task_id": self.task_id,
             "k": self.k,
+            "n_dims": self.n_dims,
             "R": self.R,
-            "expected_R": expected_rollouts(self.k),
+            "expected_R": expected_rollouts(self.k, self.n_dims),
             "P": self.P,
             "session_attempts": sum(
                 entry.attempts for entry in self.entries if entry.kind == "session"
             ),
-            "expected_P": expected_sessions(self.k),
+            "expected_P": expected_sessions(self.k, self.n_dims),
             "usd": self.usd,
             "rollout_usd": self.rollout_usd,
             "session_usd": self.session_usd,

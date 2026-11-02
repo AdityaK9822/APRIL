@@ -1093,6 +1093,242 @@ if __name__ == '__main__':
         "into entries + index; EXPERIENCE.md Persona column; profiles stay userContext-free"
     )
 
+    # 14. P3: PSY is a learned axis, but only inside a profile — end to end on the
+    # zcode stub, plus the post-selection judge and the edit-attribution split.
+    from core.harness import judge
+    from core.harness import schedule as harness_schedule
+    from core.harness import selection as harness_selection
+    from core.harness.library import SIMILARITY_FLOOR, Library as HarnessLibrary
+
+    assert harness_prompts.active_dims(zres_p) == ("INV", "DOM", "PSY")
+    assert harness_prompts.active_dims(zfree) == ("INV", "DOM")
+    try:
+        harness_prompts.propose(zfree, "PSY", zsurface)
+        raise AssertionError("PSY must never be scheduled without psy_levers")
+    except ValueError as psy_exc:
+        assert "psy_levers" in str(psy_exc), psy_exc
+    psy_text = personality.psy_mechanism(april_profile)
+    assert "warmth" in psy_text and "Derived behavior" in psy_text, psy_text[:80]
+    assert "trait" not in psy_text.lower().replace("traits", ""), "PSY slot must carry params, not traits"
+    assert f"capped at {harness_prompts.PERSONA_CLAUSE_CAP}" in harness_prompts.propose(
+        zres_p, "PSY", zsurface
+    )
+
+    old_zbin = os.environ.get("APRIL_ZCODE_BIN")
+    old_zroot = os.environ.get("APRIL_RUNS_ROOT")
+    ptmp = Path(tempfile.mkdtemp(prefix="april-p3-persona-"))
+    os.environ.update(
+        {"APRIL_ZCODE_BIN": str(zstub), "APRIL_RUNS_ROOT": str(ptmp / "runs")}
+    )
+    try:
+        pres = asyncio.run(
+            Harness(zpersona, runs_root=ptmp / "runs").run_task(t0, k=2, mode="agg")
+        )
+    finally:
+        if old_zbin is None:
+            os.environ.pop("APRIL_ZCODE_BIN", None)
+        else:
+            os.environ["APRIL_ZCODE_BIN"] = old_zbin
+        if old_zroot is None:
+            os.environ.pop("APRIL_RUNS_ROOT", None)
+        else:
+            os.environ["APRIL_RUNS_ROOT"] = old_zroot
+    try:
+        assert pres.status == "ok", (pres.status, pres.errors)
+        assert pres.persona == "april", pres.persona
+        expected_rollouts = {
+            "agg": [
+                "base1",
+                "base2",
+                "inv1",
+                "dom1",
+                "psy1",
+                "inv2",
+                "dom2",
+                "psy2",
+                "agg1",
+                "agg2",
+            ],
+        }
+        for pmode, prec in pres.modes.items():
+            pled = prec["ledger"]
+            assert pled["n_dims"] == 3, (pmode, pled)
+            assert pled["R"] == pled["expected_R"] == 10, (pmode, pled)
+            assert pled["P"] == pled["expected_P"] == 8, (pmode, pled)
+            assert pled["rollouts"] == expected_rollouts[pmode], (pmode, pled["rollouts"])
+            assert prec["n_dims"] == 3, (pmode, prec.get("n_dims"))
+            assert prec["ok"] and len(prec["finals"]) == 2, (pmode, prec)
+        pns = harness_schedule.ns("zcode", "zcode", "agg", 2, persona="april")
+        assert pns == "zcode-zcode-agg2-Papril", pns
+        psummary = ptmp / "runs" / pns / t0.replace("/", "__") / "summary.json"
+        assert json.loads(psummary.read_text())["persona"] == "april", psummary
+        pmarks = list((ptmp / "runs").rglob(".adapt_complete"))
+        assert len(pmarks) == 8, len(pmarks)
+        assert all(zpersona.delivered(m.parent) for m in pmarks), "a marked rollout lost its deliverable"
+
+        # Judge: exactly the two machine-decidable profile rules run, the rest is attested.
+        clean = judge.trait_checklist("april", "Wrote the plan. No credentials anywhere.")
+        assert clean["ok"] and clean["deterministic"] == 2, clean
+        assert clean["attested"] >= len(april_profile.persona.protocols), clean
+        bad = judge.trait_checklist(
+            "april", "git push origin main\nsk-" + "A" * 24
+        )
+        checks_by_id = {c["id"]: c for c in bad["checks"] if c["kind"] == "deterministic"}
+        assert checks_by_id["no-unapproved-public-action"]["ok"] is False, checks_by_id
+        assert checks_by_id["no-secrets-stored-echoed-logged"]["ok"] is False, checks_by_id
+        assert bad["ok"] is False
+        approved = judge.trait_checklist(
+            "april", "git push origin main\nuser approved the release"
+        )
+        assert next(c for c in approved["checks"] if c["kind"] == "deterministic")["ok"] is True
+
+        class _Sel:
+            ok = True
+
+        class _JudgeAdapter:
+            spec = type("Spec", (), {"profile": "april", "obs_trunc": 100_000})()
+
+            def score(self, run_dir, task_id):
+                return {"value": 1}
+
+            def deliverable_text(self, run_dir):
+                return "Done, with no secrets."
+
+            def trajectory(self, run_dir, **kwargs):
+                return "trajectory"
+
+        scored = judge.score_after_selection(
+            _JudgeAdapter(), _Sel(), run_dir="x", task_id=t0
+        )
+        assert scored["value"] == 1 and scored["trait_adherence"]["ok"], scored
+        assert (
+            judge.score_after_selection(_JudgeAdapter(), None, run_dir="x", task_id=t0)
+            is None
+        ), "scoring must stay gated on selection"
+
+        # Attribution: a PSY edit stays separable from an INV edit, and only an
+        # all-PSY lesson is marked non-transferable for the library gate.
+        from core.components.base import default_registry
+
+        pbase = dict(zg_ok)
+        ppsy = dict(zg_ok)
+        ppsy["AGENTS.md"] = zg_ok["AGENTS.md"] + "\nKeep the register calm.\n"
+        pinv = dict(zg_ok)
+        pinv["scripts/spot_check.py"] = "print('changed')\n"
+        attrib = harness_selection.edit_attribution(
+            default_registry(),
+            pbase,
+            {"psy1": ppsy, "inv1": pinv},
+            {"psy1": "PSY", "inv1": "INV"},
+        )
+        assert attrib["system_prompt"]["dims"] == ["PSY"], attrib
+        assert attrib["scripts"]["dims"] == ["INV"], attrib
+        assert harness_selection.lesson_transferable(
+            {"system_prompt": {"dims": ["PSY"]}}
+        ) is False
+        assert harness_selection.lesson_transferable(attrib) is True
+        annotated = harness_selection._annotate_edits(  # noqa: SLF001
+            "candidates: psy1, inv1", {"psy1": "PSY", "inv1": "INV"}
+        )
+        assert "dimensions: INV, PSY" in annotated, annotated
+
+        # Library: cosine rank + transfer gate. april<->user passes, april<->verifier
+        # is gated unless the lesson itself says transferable.
+        assert SIMILARITY_FLOOR == 0.95
+        ltmp = Path(tempfile.mkdtemp(prefix="april-p3-lib-"))
+        try:
+            plib = HarnessLibrary(
+                root=ltmp, domain="device-control", surface=zsurface, profile="april"
+            )
+            for name, prof, ocean, transfer in (
+                ("far", "verifier", personality.ocean_row(personality.load_profile("verifier")), False),
+                ("near", "user", personality.ocean_row(personality.load_profile("user")), False),
+                ("free", "", "", True),
+            ):
+                ed = plib.dir / "harnesses" / name
+                ed.mkdir(parents=True)
+                meta = [f"# {name}", ""]
+                if prof:
+                    meta.append(f"- **profile**: `{prof}` — {ocean}")
+                meta.append(f"- **transferable**: {'true' if transfer else 'false'}")
+                (ed / "EXPERIENCE.md").write_text("\n".join(meta) + "\n")
+            plib.rebuild_index()
+            ctx = plib.load_context(5, profile="april")
+            assert "# near" in ctx and "# free" in ctx and "# far" not in ctx, ctx
+            assert ctx.index("# near") < ctx.index("# free"), "cosine rank lost"
+            free_ctx = HarnessLibrary(
+                root=ltmp, domain="device-control", surface=zsurface
+            ).load_context(5)
+            assert all(f"# {n}" in free_ctx for n in ("far", "near", "free")), free_ctx
+        finally:
+            shutil.rmtree(ltmp, ignore_errors=True)
+    finally:
+        shutil.rmtree(ptmp, ignore_errors=True)
+    checks.append(
+        "PSY end to end: 5k rollouts / 4k sessions (n_dims=3), labels "
+        "base→inv→dom→psy→final, 8 markers, `-Papril` namespace, summary persona"
+    )
+    checks.append(
+        "post-selection trait checklist (2 deterministic gates + attested rules), "
+        "PSY/INV edit attribution, cosine library gate at 0.95"
+    )
+
+    # 15. P3 scale-out: one sweep call, many profiles, isolated namespace and library root.
+    from core.harness.execution_manager import _DryProposer
+
+    old_zbin = os.environ.get("APRIL_ZCODE_BIN")
+    old_zroot = os.environ.get("APRIL_RUNS_ROOT")
+    stmp = Path(tempfile.mkdtemp(prefix="april-p3-sweep-"))
+    os.environ.update(
+        {"APRIL_ZCODE_BIN": str(zstub), "APRIL_RUNS_ROOT": str(stmp / "runs")}
+    )
+    try:
+        sweep = harness_schedule.run_sweep_zcode(
+            1,
+            runs_root=stmp / "runs",
+            library_root=stmp / "library",
+            modes=("agg",),
+            only_tasks=(t0,),
+            max_tasks=1,
+            prop=_DryProposer(),
+            profiles=("april", "user"),
+        )
+    finally:
+        if old_zbin is None:
+            os.environ.pop("APRIL_ZCODE_BIN", None)
+        else:
+            os.environ["APRIL_ZCODE_BIN"] = old_zbin
+        if old_zroot is None:
+            os.environ.pop("APRIL_RUNS_ROOT", None)
+        else:
+            os.environ["APRIL_RUNS_ROOT"] = old_zroot
+    try:
+        assert sweep["profiles"] == ["april", "user"], sweep["profiles"]
+        assert sweep["n_dims"] == 3
+        assert set(sweep["results"]) == {"april", "user"}, sweep["results"].keys()
+        roots = {p: sweep["results"][p]["library_root"] for p in ("april", "user")}
+        assert roots["april"] != roots["user"], roots
+        assert roots["april"].endswith("/april") and roots["user"].endswith("/user"), roots
+        for prof in ("april", "user"):
+            ns_agg = harness_schedule.ns("zcode", "zcode", "agg", 1, persona=prof)
+            task_dir = stmp / "runs" / ns_agg / t0.replace("/", "__")
+            summary = json.loads((task_dir / "summary.json").read_text())
+            assert summary["persona"] == prof, (prof, summary.get("persona"))
+            row = sweep["results"][prof]["domains"][0]["tasks"][0]
+            assert row["status"] == "ok", row
+            # The reflection evidence tree carries the authored fixtures through
+            # the inline-fixture seam, not a task directory.
+            assert (task_dir / "reflection" / "agg1" / "source" / "devices.json").is_file(), (
+                prof,
+                sorted((task_dir / "reflection").rglob("*")),
+            )
+    finally:
+        shutil.rmtree(stmp, ignore_errors=True)
+    checks.append(
+        "multi-profile sweep: one call fans out per profile with `-P<id>` namespaces "
+        "and per-profile library roots (scale-out contract holds)"
+    )
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")

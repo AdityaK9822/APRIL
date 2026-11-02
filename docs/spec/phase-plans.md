@@ -277,6 +277,19 @@ INV/DOM — proposals evolve *how components express behavior*, judged post-sele
 per task; blind selection personalized nowhere; per-persona libraries;
 `ComponentRegistry.diff` separates PSY-sourced edits.
 
+**Implementation notes (2026-11-02):** PSY is gated on `psy_levers`, which only
+`resolve_prompts` fills from an active profile, so persona-free runs keep the
+2-dimension R=4k/P=3k arithmetic. `Ledger.n_dims` is validated (2 or 3) and is
+the single source for `assert_identity` and the summary. The deterministic judge
+has exactly two machine checks (unapproved public action with an approval
+marker; secrets hygiene); every other protocol/extra/threshold rule is recorded
+`attested` with `ok=None`. Retrieval uses `SIMILARITY_FLOOR = 0.95`; a PSY-only
+lesson is `transferable: false`. `run_sweep(profiles=...)` fans out profiles and
+per-profile library roots; a multi-seed run remains a caller loop over
+`seed=` (the namespace already carries `-s<seed>`). Offline pins: a k=2 APRIL
+run proving R=10=5k, P=8=4k, eight markers; a two-profile sweep proving
+`-P<persona>` namespaces and separate library roots.
+
 ---
 
 ## P4 — Scale-out contract
