@@ -11,6 +11,12 @@ missions only, trait directives never touch the INV/DOM lanes, the blind
 selector never sees persona data, and derived parameters (not raw traits) are
 what P3's PSY dimension will learn over.
 
+P4 makes the scale-out contract explicit: a profile is data. Every vector that is
+five OCEAN traits compiles with no code. A vector carrying signal the band tables
+cannot express (currently `facets`, the deferred 30-facet expansion) still loads
+and runs, but degrades to its authored c1 guidance with the PSY lane off —
+`out_of_band()` names the reason, never a silent approximation.
+
 JS `Math.round` rounds half UP; python's built-in `round` is banker's, so every
 derived integer goes through `_round` = `math.floor(x + 0.5)`. This is
 load-bearing: APRIL's proactivity is exactly 66.5, and both implementations
@@ -90,6 +96,10 @@ class PersonaConfig:
     protocols: tuple[str, ...] = ()
     extraRules: tuple[str, ...] = ()
     userContext: tuple[str, ...] = ()
+    # Deferred 30-facet expansion: sub-trait values the band tables cannot
+    # compile. Kept on the persona so a facet profile degrades to its authored
+    # c1 text instead of silently dropping the facet signal (`out_of_band`).
+    facets: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -163,6 +173,15 @@ def validate(p: PersonaConfig | Profile) -> list[str]:
         errors.append("relationship.friend + relationship.butler must equal 1")
     if p.candorFloor is not None and (p.candorFloor < 0 or p.candorFloor > 100):
         errors.append("candorFloor must be 0 to 100")
+    for name, v in p.facets:
+        if (
+            isinstance(v, bool)
+            or not isinstance(v, (int, float))
+            or not math.isfinite(v)
+            or v < 0
+            or v > 100
+        ):
+            errors.append(f"facet {name!r} must be a number from 0 to 100 (got {v})")
     return errors
 
 
@@ -322,6 +341,27 @@ THRESHOLD_RULES: tuple[tuple[str, int, str], ...] = (
 )
 
 
+def out_of_band(p: PersonaConfig | Profile) -> str:
+    """Why the band tables cannot compile this vector; `''` means it is in band.
+
+    P4 scale-out contract: a profile is data, and the data the compiler knows is
+    the five OCEAN traits × five bands. A profile that carries facet-level
+    signal is loadable and its authored text still compiles (c1 guidance), but
+    trait directives, derived voice/honesty lines and threshold rules are
+    withheld rather than invented from traits that do not describe the vector.
+    # ponytail: 30-facet Big Five expansion is DEFERRED. When facets land they
+    # become authored table data (`FACET_CONDITIONS`) and this degradation path
+    # shrinks to genuinely unknown keys; until then a facet profile is the
+    # honest ceiling of "one JSON file, zero code".
+    """
+    facets = persona_of(p).facets
+    if facets:
+        names = ", ".join(name for name, _ in facets[:4])
+        more = "" if len(facets) <= 4 else f", +{len(facets) - 4} more"
+        return f"{len(facets)} facet trait(s) with no band directives ({names}{more})"
+    return ""
+
+
 def psy_mechanism(p: PersonaConfig | Profile) -> str:
     """The PSY dimension's turnable levers, derived from `derive()` params only.
 
@@ -333,6 +373,11 @@ def psy_mechanism(p: PersonaConfig | Profile) -> str:
     drift apart. This text is a mission slot and rides the bad-word filter.
     """
     p = persona_of(p)
+    if out_of_band(p):
+        # # ponytail: the PSY lane learns over derive() levers, which are only
+        # meaningful when the vector compiles to band directives. A facet profile
+        # keeps PSY off (2-dim ledger) until the facet tables are authored.
+        return ""
     d = derive(p)
     lines = [
         "Derived behavior for the active profile. Encode the mechanism, never the label:",
@@ -378,17 +423,26 @@ def compile_persona(p: PersonaConfig | Profile) -> str:
         raise ValueError(f"Invalid persona: {'; '.join(problems)}")
 
     d = derive(p)
+    degraded = out_of_band(p)
     lines: list[str] = []
     lines.append(f"You are {p.name}." + (f" {p.summary}" if p.summary else ""))
     if p.role:
         lines.append(f"Role: {p.role}")
 
-    lines += ["", "## Personality (OCEAN)"]
-    lines.append(TRAIT_DIRECTIVE_HEADER)
-    for t in TRAITS:
-        v = p.ocean.cell(t)
-        label = t[0].upper() + t[1:]
-        lines.append(f"- {label} ({levelWord(v)}, {v}): {DIRECTIVES[t][bandOf(v)]}")
+    if degraded:
+        # c1 only: authored text, no inventoried trait directives.
+        lines += ["", "## Personality (authored)"]
+        lines.append(
+            "Trait-level directives are not compiled for this profile. Express the "
+            "traits described above through behavior, not by announcing them."
+        )
+    else:
+        lines += ["", "## Personality (OCEAN)"]
+        lines.append(TRAIT_DIRECTIVE_HEADER)
+        for t in TRAITS:
+            v = p.ocean.cell(t)
+            label = t[0].upper() + t[1:]
+            lines.append(f"- {label} ({levelWord(v)}, {v}): {DIRECTIVES[t][bandOf(v)]}")
 
     if p.relationship is not None:
         r = p.relationship
@@ -407,21 +461,22 @@ def compile_persona(p: PersonaConfig | Profile) -> str:
             "As a butler: courteous and anticipating needs, dignified and never servile." + addr
         )
 
-    lines += ["", "## Voice"]
-    lines.append(
-        f"Warmth {d.warmth}/100, formality {d.formality}/100, humor {d.humor}/100, "
-        f"typical length {d.length}."
-    )
-    lines.append(
-        "Lead with the answer or deliverable. No filler, no generic motivation, no flattery."
-    )
+    if not degraded:
+        lines += ["", "## Voice"]
+        lines.append(
+            f"Warmth {d.warmth}/100, formality {d.formality}/100, humor {d.humor}/100, "
+            f"typical length {d.length}."
+        )
+        lines.append(
+            "Lead with the answer or deliverable. No filler, no generic motivation, no flattery."
+        )
 
-    lines += ["", "## Honesty"]
-    lines.append(
-        f"Candor level {d.candor}/100. Kindness changes how you say something, never "
-        "whether you say it. When the user is wrong, over-building, or taking on too "
-        "much, say so once, clearly and kindly, then respect their decision."
-    )
+        lines += ["", "## Honesty"]
+        lines.append(
+            f"Candor level {d.candor}/100. Kindness changes how you say something, never "
+            "whether you say it. When the user is wrong, over-building, or taking on too "
+            "much, say so once, clearly and kindly, then respect their decision."
+        )
 
     if p.protocols:
         lines += ["", "## Protocols (non-negotiable)"]
@@ -430,9 +485,10 @@ def compile_persona(p: PersonaConfig | Profile) -> str:
         lines.append(PROTOCOL_OVERRIDE_LINE)
 
     rules = list(p.extraRules)
-    for name, threshold, rule in THRESHOLD_RULES:
-        if getattr(d, name) >= threshold:
-            rules.append(rule)
+    if not degraded:
+        for name, threshold, rule in THRESHOLD_RULES:
+            if getattr(d, name) >= threshold:
+                rules.append(rule)
     if rules:
         lines += ["", "## Working rules"]
         for r in rules:
@@ -467,9 +523,51 @@ def to_request(p: PersonaConfig | Profile, messages: Sequence[Mapping[str, str]]
 PROFILES_DIR = Path(__file__).resolve().parents[2] / "profiles"
 
 
+PERSONA_KEYS = frozenset(
+    {
+        "id",
+        "name",
+        "summary",
+        "role",
+        "ocean",
+        "relationship",
+        "candorFloor",
+        "protocols",
+        "extraRules",
+        "userContext",
+        "facets",
+    }
+)
+
+
 def persona_from_dict(data: Mapping) -> PersonaConfig:
+    """Build a persona from profile JSON. Unknown keys are refused so a typo in a
+    hand-authored profile cannot silently change nothing. `facets` is accepted
+    (deferred 30-facet expansion) and is what `out_of_band` degrades on."""
+    unknown = sorted(set(data) - PERSONA_KEYS)
+    if unknown:
+        raise ValueError(
+            f"unknown profile key(s): {', '.join(unknown)}; "
+            f"expected a subset of {', '.join(sorted(PERSONA_KEYS))}"
+        )
+    extra_traits = sorted(set(data["ocean"]) - set(TRAITS))
+    if extra_traits:
+        raise ValueError(
+            f"unknown OCEAN trait(s): {', '.join(extra_traits)}; "
+            f"expected {', '.join(TRAITS)} (facets belong under `facets`)"
+        )
+    facets_raw = data.get("facets") or {}
+    if not isinstance(facets_raw, Mapping):
+        raise ValueError("facets must be an object mapping facet names to numbers")
     ocean = Ocean(**{t: data["ocean"][t] for t in TRAITS})
     rel = data.get("relationship")
+    if rel:
+        unknown_rel = sorted(set(rel) - {"friend", "butler", "address", "addressWhen"})
+        if unknown_rel:
+            raise ValueError(
+                f"unknown relationship key(s): {', '.join(unknown_rel)}; "
+                f"expected friend, butler, address, addressWhen"
+            )
     relationship = (
         Relationship(
             friend=rel["friend"],
@@ -490,6 +588,7 @@ def persona_from_dict(data: Mapping) -> PersonaConfig:
         protocols=tuple(data.get("protocols", ())),
         extraRules=tuple(data.get("extraRules", ())),
         userContext=tuple(data.get("userContext", ())),
+        facets=tuple((str(k), v) for k, v in facets_raw.items()),
     )
 
 
@@ -706,6 +805,35 @@ def demo() -> None:
     low = compiled.lower()
     for bad in HARNESS_PROMPT_BAD_WORDS:
         assert bad not in low, bad
+
+    # P4 scale-out: personality is data. Every committed profile above compiled
+    # from its JSON with no registry and no per-profile branch; the caller scans
+    # the harness source to prove a new id never touches code.
+    assert len(profiles) >= 4, sorted(profiles)
+
+    # Out-of-band: a facet vector loads and runs, but only its authored c1 text
+    # compiles and the PSY lane stays off. The ceiling is named in `out_of_band`.
+    faceted = replace(april, facets=(("trust", 90), ("dutifulness", 70)))
+    assert out_of_band(faceted), "a facet vector must report its ceiling"
+    ftext = compile_persona(faceted)
+    assert "## Personality (authored)" in ftext, ftext
+    assert "## Personality (OCEAN)" not in ftext, "band directives leaked"
+    assert "## Voice" not in ftext and "## Honesty" not in ftext, "derived lines leaked"
+    assert "## Protocols (non-negotiable)" in ftext, "authored protocols must survive"
+    assert psy_mechanism(faceted) == "", "PSY must not learn over an uncompilable vector"
+
+    # Unknown keys are refused, so a typo cannot silently compile nothing.
+    base_ocean = {t: 50 for t in TRAITS}
+    for bad_data in (
+        {"name": "x", "ocean": base_ocean, "typo": 1},
+        {"name": "x", "ocean": {**base_ocean, "trust": 10}},
+    ):
+        try:
+            persona_from_dict(bad_data)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"unknown keys must be refused: {sorted(bad_data)}")
 
     print(f"  ok: {_ts_reference_check(profiles)}")
 

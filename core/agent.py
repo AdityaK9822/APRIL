@@ -1329,6 +1329,136 @@ if __name__ == '__main__':
         "and per-profile library roots (scale-out contract holds)"
     )
 
+    # 16. P4 scale-out contract: a third persona is ONE JSON file, zero code. The
+    # proof is the negative source scan plus a real 1-task sweep at full arithmetic.
+    ride = personality.load_profile("ridealong")
+    assert personality.out_of_band(ride) == "", personality.out_of_band(ride)
+    naming = [
+        p
+        for p in (Path.cwd() / "core" / "harness").rglob("*.py")
+        if "ridealong" in p.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert not naming, f"third profile leaked into harness code: {naming}"
+    rtmp = Path(tempfile.mkdtemp(prefix="april-p4-ridealong-"))
+    old_zbin = os.environ.get("APRIL_ZCODE_BIN")
+    old_zroot = os.environ.get("APRIL_RUNS_ROOT")
+    os.environ.update(
+        {"APRIL_ZCODE_BIN": str(zstub), "APRIL_RUNS_ROOT": str(rtmp / "runs")}
+    )
+    try:
+        ride_sweep = harness_schedule.run_sweep_zcode(
+            1,
+            runs_root=rtmp / "runs",
+            library_root=rtmp / "library",
+            modes=("agg",),
+            only_tasks=(t0,),
+            max_tasks=1,
+            prop=_DryProposer(),
+            profiles=("ridealong",),
+        )
+    finally:
+        if old_zbin is None:
+            os.environ.pop("APRIL_ZCODE_BIN", None)
+        else:
+            os.environ["APRIL_ZCODE_BIN"] = old_zbin
+        if old_zroot is None:
+            os.environ.pop("APRIL_RUNS_ROOT", None)
+        else:
+            os.environ["APRIL_RUNS_ROOT"] = old_zroot
+    try:
+        assert ride_sweep["profiles"] == ["ridealong"], ride_sweep["profiles"]
+        assert ride_sweep["n_dims"] == 3, ride_sweep["n_dims"]
+        assert ride_sweep["results"]["ridealong"]["library_root"].endswith("/ridealong")
+        rrow = ride_sweep["results"]["ridealong"]["domains"][0]["tasks"][0]
+        assert rrow["status"] == "ok", rrow
+        rns = harness_schedule.ns("zcode", "zcode", "agg", 1, persona="ridealong")
+        assert rns == "zcode-zcode-agg1-Pridealong", rns
+        rsum = json.loads(
+            (rtmp / "runs" / rns / t0.replace("/", "__") / "summary.json").read_text()
+        )
+        assert rsum["persona"] == "ridealong", rsum.get("persona")
+        rled = rsum["modes"]["agg"]["ledger"]
+        assert (rled["n_dims"], rled["R"], rled["P"]) == (3, 5, 4), rled
+        assert rled["R"] == rled["expected_R"] and rled["P"] == rled["expected_P"], rled
+        rmarks = list((rtmp / "runs").rglob(".adapt_complete"))
+        assert len(rmarks) == 4, len(rmarks)
+        assert all(zadapter.delivered(m.parent) for m in rmarks), "marked rollout lost deliverable"
+    finally:
+        shutil.rmtree(rtmp, ignore_errors=True)
+    checks.append(
+        "P4 scale-out: profiles/ridealong.json lands as data only (no harness source "
+        "names it); 1-task sweep yields -Pridealong, R=5=5k, P=4=4k, own library root"
+    )
+
+    # 17. P4 degradation: a vector the band tables cannot compile still loads and
+    # runs, but emits authored c1 text only and keeps the PSY lane off.
+    otmp = Path(tempfile.mkdtemp(prefix="april-p4-oob-"))
+    try:
+        odir = otmp / "profiles"
+        odir.mkdir()
+        odata = json.loads((Path.cwd() / "profiles" / "ridealong.json").read_text())
+        odata["facets"] = {"trust": 90, "dutifulness": 70}
+        (odir / "faceted.json").write_text(json.dumps(odata))
+        faceted = personality.load_profile("faceted", odir)
+        assert personality.out_of_band(faceted), "facet vector must report its ceiling"
+        fblock = personality.compile_persona(faceted)
+        assert "## Personality (authored)" in fblock, fblock
+        assert "## Personality (OCEAN)" not in fblock and "## Voice" not in fblock, fblock
+        assert "Narrate what you are about to do" in fblock, "authored rules must survive"
+        assert personality.psy_mechanism(faceted) == "", "PSY leaked onto an uncompilable vector"
+
+        # The spec seam keeps psy_levers empty, so the ledger stays 2-dimensional.
+        old_load = personality.load_profile
+        personality.load_profile = lambda name, profiles_dir=None: (  # type: ignore[assignment]
+            faceted if name == "faceted" else old_load(name)
+        )
+        try:
+            fadapt = type(
+                "FacetAdapter",
+                (),
+                {
+                    "spec": type(
+                        "FacetSpec",
+                        (),
+                        {"profile": "faceted", "prompts": type(zres_p)()},
+                    )()
+                },
+            )()
+            fprompts = resolve_prompts(fadapt, t0)
+        finally:
+            personality.load_profile = old_load  # type: ignore[assignment]
+        assert "## Personality (authored)" in fprompts.persona_guidance, fprompts.persona_guidance[:80]
+        assert fprompts.psy_levers == "", "resolve_prompts activated PSY for a facet profile"
+        assert harness_prompts.active_dims(fprompts) == ("INV", "DOM"), "dims must stay 2-D"
+        assert "# ponytail:" in (
+            Path.cwd() / "core" / "harness" / "personality.py"
+        ).read_text(encoding="utf-8")
+    finally:
+        shutil.rmtree(otmp, ignore_errors=True)
+    checks.append(
+        "P4 degradation: a facet (out-of-band) vector compiles authored c1 text only, "
+        "PSY stays off, ledger arithmetic stays 2-D; ceiling marked `# ponytail:`"
+    )
+
+    # 18. P4-4.2: the profile format is documented as a contract.
+    schema = Path.cwd() / "docs" / "spec" / "ocean-profile-schema.md"
+    assert schema.is_file(), schema
+    stext = schema.read_text(encoding="utf-8")
+    for needle in (
+        "## 2. Fields",
+        "## 3. Derived parameters",
+        "## 7. Degradation contract",
+        "userContext",
+        "SIMILARITY_FLOOR",
+        "facets",
+        "one JSON file",
+    ):
+        assert needle in stext, f"schema doc is missing {needle!r}"
+    checks.append(
+        "P4 schema contract: docs/spec/ocean-profile-schema.md documents fields, "
+        "derivation, transfer gate, and the degradation ceiling"
+    )
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")

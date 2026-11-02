@@ -308,6 +308,22 @@ run proving R=10=5k, P=8=4k, eight markers; a two-profile sweep proving
 - **Deferred (not now):** 30-facet Big Five expansion; legacy-lesson nearest-profile
   backfill script.
 
+**Implementation notes (2026-11-03):** `load_profiles` globs `profiles/*.json` (id =
+filename stem), so the third persona, `profiles/ridealong.json` (low N, high A, mid E),
+landed as data with no registry and no harness source naming it; the offline pin scans
+`core/harness/**/*.py` for the id. Its 1-task sweep runs as
+`zcode-zcode-agg1-Pridealong` with R=5=5k, P=4=4k, four markers and
+`library_root/ridealong`. `docs/spec/ocean-profile-schema.md` is the format contract
+(fields, band edges, derivation formulas, validation, transfer gate, add-a-profile
+recipe). Out-of-band vectors are today `facets` (the deferred 30-facet expansion): they
+load and run, but `personality.out_of_band` names the ceiling (with the `# ponytail:`
+note), `compile_persona` emits authored c1 text only — no OCEAN directives, Voice/
+Honesty lines, or threshold rules — and `psy_mechanism` returns `""`, so
+`prompts.active_dims` stays `("INV","DOM")` and the ledger keeps R=4k/P=3k. Unknown
+top-level, `ocean` and `relationship` keys are refused at load time so a typo cannot
+silently compile nothing. Offline pins: the ridealong sweep, the facet degradation
+through `resolve_prompts`, and the schema doc's required sections.
+
 ---
 
 ## P5 — ADE deployment + runtime persona
