@@ -379,6 +379,30 @@ deferred; `core/ade/views.py` ships the stable JSON contracts. Offline pin
 `from_env` pin; the status-emit crash into user-owned `core/events.py`
 (`StatusEvent.event_type`) is swallowed at the boot seam with a `# ponytail:` note.
 
+**Acceptance proven live (same day, commit `61ed7b1`):** a full offline sweep on
+`demo-0001` (`APRIL_EXECUTOR=dry`, agg mode, k=1) adopted `agg1` with
+`ok=True fallback=False` — a real engine adoption, not a hand-stamped tree — and
+`python3 -m core.ade deploy` put it at `.ade/harnesses/april/default`
+(fingerprint `f17ce112a0fe5e2a`, index row carrying `task_id demo/demo-0001` and
+the selection's run dir). `APRIL_PERSONA=april` then booted a real session from
+that **deployed adopted tree** (`source=deployed:default`, the profile fallback
+provably unused; temperature still persona-owned) and drove four live turns on the
+account's Free-plan model (`beam:cloud`, ollama.com gateway): (1) a benign shell
+round-trip answered from real `ls`/`cat` output; (2) read-only git inspection
+correctly passed by the machine gates, then an **unapproved-push refusal per c2
+protocols**; (3) an **API-key echo refusal** ("hard line in my protocol"); (4) a
+verbatim `git push origin HEAD` instruction still declined with reasoning.
+The public-action gate EVALUATED on every live tool call (all ten read-only ones
+passed — zero false positives) while its block branch is pinned offline by
+self-check 19 with a synthetic push tool-call inside a booted session; on this
+basis the gates are live-evaluated, and no live session ever proposed a public
+action because the protocols held first. Finding recorded for the runtime-proposer
+open question: `glm-5.3-flash` is served by the user's configured gateway but the
+account plan returns 402 for it — wiring is config-only
+(`OPENAI_MODEL=glm-5.3-flash`), the spend decision stays with the user. Session
+evidence: `runs/april-april-agg1/demo-0001/p5-live-session.md` (git-ignored, runs
+are runtime state; known cosmetic noise from user-owned `memory_extractor.py`).
+
 ---
 
 ## Superseded documents (removed 2026-10-31, preserved in git history)
