@@ -228,7 +228,17 @@ class AgentRuntime:
         
         # Event bus
         self._event_bus = get_event_bus()
-    
+
+        # P5 runtime persona: APRIL_PERSONA=<id> loads the adopted (or committed)
+        # persona — c1 into the system message head, c2 into the permission
+        # layer, derive().temperature into sampling. An unknown persona fails
+        # here, before any request. Spec: docs/spec/persona-dimension.md
+        self.persona_boot = None
+        self.persona_guard = None
+        from .ade import apply_to_runtime as _persona_boot_apply
+
+        self.persona_boot = _persona_boot_apply(self)
+
     def _emit_error(self, error_type: str, message: str, details: Dict = None):
         """Emit error event."""
         self._event_bus.emit(ErrorEvent(error_type=error_type, message=message, details=details))
@@ -252,6 +262,22 @@ class AgentRuntime:
         for call in tool_calls:
             tool_name = call.function.name
             tool_args = json.loads(call.function.arguments)
+            
+            # P5 permission layer: a booted persona's c2 rules decide whether a
+            # shell command runs at all. A blocked command becomes the tool
+            # result — the agent must surface the plan, get the approval marker
+            # into the command, and retry; the command is never executed.
+            guard = getattr(self, 'persona_guard', None)
+            if guard is not None and tool_name == 'shell_execute':
+                allowed, reason = guard.check(tool_args.get('command') or '')
+                if not allowed:
+                    results.append({
+                        'tool_call_id': call.id,
+                        'role': 'tool',
+                        'name': tool_name,
+                        'content': f'[persona-guard] {reason}'
+                    })
+                    continue
             
             if tool_name not in self.tool_map:
                 results.append({
@@ -1457,6 +1483,153 @@ if __name__ == '__main__':
     checks.append(
         "P4 schema contract: docs/spec/ocean-profile-schema.md documents fields, "
         "derivation, transfer gate, and the degradation ceiling"
+    )
+
+    # 19. P5: the ADE end-to-end, offline — deploy (stamp + fingerprint), tamper
+    # refusal, boot (c1/c2/temperature), the permission layer, runtime wiring,
+    # and the TUI view contract; plus the from_env APRIL_PERSONA pin.
+    from core.ade import deploy as ade_deploy, load_deployed
+    from core.ade.boot import ActionGuard, boot as ade_boot
+    from core.ade.views import persona_view as ade_persona_view
+    from core.harness import runmark
+    from core.substrate.april import APRIL_SURFACE
+
+    atmp = Path(tempfile.mkdtemp(prefix="april-p5-ade-"))
+    aderoot = atmp / ".ade"
+    old_ade_root = os.environ.get("APRIL_ADE_ROOT")
+    old_persona_env = os.environ.get("APRIL_PERSONA")
+    try:
+        # from_env reads the persona id; empty stays the no-boot default.
+        os.environ["APRIL_PERSONA"] = "april"
+        assert AgentConfig.from_env().persona == "april", "from_env must read APRIL_PERSONA"
+        os.environ["APRIL_PERSONA"] = ""
+        assert AgentConfig.from_env().persona == "", "empty APRIL_PERSONA stays no-boot"
+
+        # Deploy the shipped base tree under the april persona, with a synthetic
+        # local override under the TEMP root (never the repo's real .ade/etc).
+        os.environ["APRIL_ADE_ROOT"] = str(aderoot)
+        etc = aderoot / "etc"
+        etc.mkdir(parents=True)
+        (etc / "persona-user-context.md").write_text(
+            "## APRIL userContext (personal facts that shape behavior)\n\n"
+            "- fact one\n- fact two\n",
+            encoding="utf-8",
+        )
+        row = ade_deploy(
+            Path.cwd() / "core" / "harness" / "basetree" / "april",
+            surface=APRIL_SURFACE,
+            persona="april",
+            domain="default",
+            task_id="demo/demo-0001",
+        )
+        fdir = aderoot / "harnesses" / "april" / "default"
+        assert row["fingerprint"] not in ("", "absent", "base") and runmark.fingerprint(
+            fdir
+        ) == row["fingerprint"], row
+        stamped = (fdir / "systemprompt.md").read_text(encoding="utf-8")
+        assert "## persona: compiled" in stamped, "deployment did not stamp the persona"
+        assert "## persona: protocols" in (fdir / "guardrails.md").read_text(encoding="utf-8")
+
+        # Tamper evidence: bytes changed after deployment -> refusal, not fallback.
+        sp = fdir / "systemprompt.md"
+        original = sp.read_text(encoding="utf-8")
+        sp.write_text(original + "\n<!-- tampered -->", encoding="utf-8")
+        try:
+            load_deployed("april")
+            raise AssertionError("a tampered deployment must be refused")
+        except ValueError:
+            pass
+        sp.write_text(original, encoding="utf-8")
+        assert load_deployed("april") is not None, "restored tree must load again"
+
+        # Boot: c1 (+ local facts) -> system prompt, c2 -> guardrails, temp derived.
+        b = ade_boot("april", domain="default")
+        assert b.source == "deployed:default", b.source
+        assert b.system_prompt.startswith("# APRIL"), b.system_prompt[:40]
+        assert "## About the user" in b.system_prompt and b.user_context == (
+            "fact one",
+            "fact two",
+        )
+        assert "## Protocols" in b.guardrails and b.machine_rules == (
+            "no-unapproved-public-action",
+            "no-secrets-stored-echoed-logged",
+        )
+
+        # The permission layer reuses the post-selection machine gates verbatim.
+        g = ActionGuard("april", b.guardrails)
+        blocked, why = g.check("git push origin main")
+        assert not blocked and "approval" in why, why
+        assert g.check("git push origin main\nuser approved the release")[0]
+        bad, why2 = g.check("echo sk-" + "A" * 24)
+        assert not bad and "secrets" in why2, why2
+        assert g.check("ls -la")[0]
+        assert len(g.attested_rules()) >= 7, g.attested_rules()
+
+        # Runtime wiring: system head, derived temperature, guard on shell calls.
+        rt = AgentRuntime(
+            AgentConfig(
+                model="m",
+                api_key="dummy",
+                api_base_url="http://localhost:1",
+                persona="april",
+            )
+        )
+        pb = rt.persona_boot
+        assert pb is not None and pb.source == "deployed:default", (
+            pb.source if pb else None
+        )
+        head = rt.session.context[0]
+        assert head["role"] == "system" and head["content"].startswith("# APRIL")
+        assert rt.config.temperature == pb.temperature, "derive() must own sampling"
+        assert rt.config.temperature != 0.7, "the persona temperature overrode the default"
+        res = rt._process_tool_calls(
+            [
+                type(
+                    "BlockedCall",
+                    (),
+                    {
+                        "function": type(
+                            "F",
+                            (),
+                            {
+                                "name": "shell_execute",
+                                "arguments": '{"command": "git push origin main"}',
+                            },
+                        )(),
+                        "id": "call_p5",
+                    },
+                )()
+            ]
+        )
+        assert str(res[0]["content"]).startswith("[persona-guard]"), res[0]["content"]
+        plain = AgentRuntime(
+            AgentConfig(model="m", api_key="dummy", api_base_url="http://localhost:1")
+        )
+        assert plain.persona_boot is None and plain.persona_guard is None
+
+        # The view contract: boot summary + deployments, facts as a COUNT only.
+        pv = ade_persona_view("april", domain="default", library_root=aderoot / "library")
+        assert pv["source"] == "deployed:default" and pv["fingerprint"] == row["fingerprint"]
+        assert pv["deployed_dir"] == str(fdir), "the view must read the temp ADE root"
+        assert len(pv["attested_rules"]) >= 7
+        assert pv["user_context_facts"] == len(b.user_context) == 2
+        assert "fact one" not in json.dumps(pv), "the view must never carry fact text"
+        assert len(pv["deployments"]) == 1 and pv["deployments"][0]["fingerprint"] == row["fingerprint"]
+    finally:
+        if old_ade_root is None:
+            os.environ.pop("APRIL_ADE_ROOT", None)
+        else:
+            os.environ["APRIL_ADE_ROOT"] = old_ade_root
+        if old_persona_env is None:
+            os.environ.pop("APRIL_PERSONA", None)
+        else:
+            os.environ["APRIL_PERSONA"] = old_persona_env
+        shutil.rmtree(atmp, ignore_errors=True)
+    checks.append(
+        "P5 ADE: deploy stamps + fingerprints (tamper refused, not fallback); boot maps "
+        "c1/c2/derived temperature (+ local facts); guard blocks unapproved public actions "
+        "and secrets, attests the rest; runtime boots in one construction; view exposes "
+        "counts, never fact text; from_env reads APRIL_PERSONA"
     )
 
     for line in checks:

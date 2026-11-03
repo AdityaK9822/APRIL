@@ -347,6 +347,38 @@ APRIL agent.
 **Acceptance:** an adopted APRIL tree drives a live session with the APRIL persona;
 guardrail protocols (incl. the public-action gate) evaluate at runtime.
 
+**Implementation notes (2026-11-03):** the specs landed first
+(`docs/spec/zcode-substrate.md`, `docs/spec/persona-dimension.md`), then the code:
+`core/ade/` (`deploy.py`, `boot.py`, `views.py`, `__main__.py`). Deployment validates
+on `APRIL_SURFACE` and refuses — never sanitizes — an invalid source; a persona-free
+adopted tree is stamped with the compiled c1 block (`## persona: compiled` on
+`systemprompt.md`) and the profile protocols (`## persona: protocols` on
+`guardrails.md`), while proposer-authored `## persona:` sections are left untouched.
+The deployment persona ceiling is `ADE_PERSONA_CAP = 6000` chars, distinct from the
+engine's proposal cap (`tree.PERSONA_CLAUSE_CAP = 1600` — proposals are per-run
+always-on cost; a deployed persona IS the runtime system prompt and cannot become an
+on-demand skill; `# ponytail:` the real ceiling is the runtime token budget — revisit
+when one exists). Every deploy appends an `index.json` row fingerprinted by
+`runmark.fingerprint`; `load_deployed` refuses a tree whose bytes changed after
+deployment (redeploy is a decision, never a silent fallback). Runtime boot:
+`AgentConfig.from_env` reads `APRIL_PERSONA`; `AgentRuntime.__init__` applies it once
+— c1 at the head of the session context (exactly once), c2 into the action guard,
+`derive().temperature` over the configured temperature — resolution order is deployed
+tree (fingerprint-verified) then committed profile, and an unknown id fails loudly
+before any request. The permission layer shares the post-selection checklist's
+machine gates verbatim through the new public seam `judge.public_action_hits /
+approved_marker / secret_hits`: an unapproved public action becomes a
+`[persona-guard] …` tool result (never executed; the marker text re-entry is
+instructed in the block reason), secrets are refused outright, non-shell tools pass
+through. Local user facts join at boot only from the git-ignored
+`<ADE root>/etc/persona-user-context.md` (`## APRIL userContext` block) and never
+leave as text — `persona_view` reports a count. The ADE stays agent-driveable:
+plain callables and `python3 -m core.ade {deploy,boot,view}`. TUI widgets remain
+deferred; `core/ade/views.py` ships the stable JSON contracts. Offline pin
+(self-check 19) covers deploy→tamper-refusal→boot→guard→runtime→view plus the
+`from_env` pin; the status-emit crash into user-owned `core/events.py`
+(`StatusEvent.event_type`) is swallowed at the boot seam with a `# ponytail:` note.
+
 ---
 
 ## Superseded documents (removed 2026-10-31, preserved in git history)

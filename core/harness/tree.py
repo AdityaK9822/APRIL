@@ -528,6 +528,7 @@ def validate(
     allow_subagents: bool = True,
     always_on_max: int | None = None,
     reserved_scripts: frozenset[str] | set[str] = RESERVED_SCRIPTS,
+    persona_cap: int = PERSONA_CLAUSE_CAP,
 ) -> dict:
     """Raise ValueError listing every problem; return a census of the validated tree."""
     errs: list[str] = []
@@ -550,10 +551,10 @@ def validate(
         if rel not in tree:
             continue
         n_persona = persona_clause_chars(tree[rel])
-        if n_persona > PERSONA_CLAUSE_CAP:
+        if n_persona > persona_cap:
             errs.append(
                 f"{rel}: `## persona:` section(s) are {n_persona} chars, over the "
-                f"{PERSONA_CLAUSE_CAP}-char always-on persona cap; move longer persona "
+                f"{persona_cap}-char always-on persona cap; move longer persona "
                 f"prose into an on-demand {surface.skill_dir}/<name>/SKILL.md"
             )
 

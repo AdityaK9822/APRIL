@@ -116,6 +116,25 @@ def _secrets_check(text: str) -> dict:
     }
 
 
+def public_action_hits(text: str) -> bool:
+    """Whether `text` carries an explicit public/outward action.
+
+    The runtime permission layer reuses exactly the post-selection checklist's
+    pattern set — one definition of "public action", two users of it.
+    """
+    return any(pat.search(str(text or "")) for pat in _PUBLIC_ACTION_PATTERNS)
+
+
+def approved_marker(text: str) -> bool:
+    """Whether `text` carries the explicit user/operator approval marker."""
+    return bool(_APPROVAL_PATTERN.search(str(text or "")))
+
+
+def secret_hits(text: str) -> list[str]:
+    """Labels of credential-shaped findings in `text` (permission layer)."""
+    return [label for label, pat in _SECRET_PATTERNS if _find(pat, text)]
+
+
 def trait_checklist(
     profile: Any,
     text: str,
@@ -304,4 +323,7 @@ __all__ = [
     "score_after_selection",
     "selection_ok",
     "trait_checklist",
+    "public_action_hits",
+    "approved_marker",
+    "secret_hits",
 ]
