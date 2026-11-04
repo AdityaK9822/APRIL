@@ -136,10 +136,33 @@ def boot(
 
     profile = load_profile(name)  # unknown persona: loud FileNotFoundError
     temperature = float(derive(profile).temperature)
+
+    # Resolve c1 (system prompt) / c2 (guardrails) by ROLE against the
+    # surface: APRIL keeps them in their own files; the zcode surface folds
+    # both into the single AGENTS.md file (P7-5). An unresolvable surface
+    # (no always-on file) raises loudly rather than booting an empty persona.
+    if not getattr(surface, "always_on", ()):
+        raise ValueError(f"surface {getattr(surface, 'name', surface)!r} exposes no always-on file (no c1/c2 role)")
+    c1_name = surface.always_on[0]
+    if len(surface.always_on) > 1:
+        c2_name = surface.always_on[1]
+    else:
+        c2_name = None  # zcode surface: guardrails are re-derived from profile
+
     if deployment is not None:
         tree = deployment.tree
-        system_prompt = tree.get("systemprompt.md", "").strip()
-        guardrails = tree.get("guardrails.md", "").strip()
+        system_prompt = tree.get(c1_name, "").strip()
+        if c2_name is not None:
+            guardrails = tree.get(c2_name, "").strip()
+        else:
+            # zcode deployments carry the persona in AGENTS.md, so the
+            # ActionGuard reuses the profile's compiled protocols.
+            guardrails = _compiled_guardrails(profile)
+        if not system_prompt:
+            raise ValueError(
+                f"{c1_name}: deployed persona has an empty system prompt on "
+                f"surface {surface.name!r}; redeploy with the persona stamped"
+            )
         source = f"deployed:{deployment.row.get('domain', domain)}"
     else:
         system_prompt = compile_persona(profile).strip()

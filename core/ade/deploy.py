@@ -161,9 +161,17 @@ def _stamp(surface: tree_mod.SurfaceSpec, tree: tree_mod.Tree, persona: str) -> 
     profile = load_profile(persona)
     out = dict(tree)
 
-    c1 = "systemprompt.md"
-    c2 = "guardrails.md"
-    if c1 in surface.always_on and not _PERSONA_SECTION_RX.search(out.get(c1, "")):
+    # Resolve the c1 (system prompt) / c2 (guardrails) slots by ROLE rather than
+    # fixed file name: APRIL has distinct per-role files (systemprompt.md /
+    # guardrails.md); the zcode surface carries both halves in the single
+    # AGENTS.md file, so a ZCODE deployment stamps both sections into it. The
+    # decrement that previously left zcode surfaces stamping nowhere (empty c1)
+    # is retired here (P7-5).
+    c1 = surface.always_on[0]
+    c2 = surface.always_on[1] if len(surface.always_on) > 1 else surface.always_on[0]
+    if c1 not in surface.always_on:
+        raise ValueError(f"surface {surface.name!r} has no always-on c1 (system prompt) file")
+    if c1 in surface.always_on and not re.search(r"##\s*persona\s*:\s*compiled\b", out.get(c1, ""), re.I):
         block = compile_persona(profile)
         if len(block) > ADE_PERSONA_CAP:
             raise ValueError(
@@ -175,7 +183,7 @@ def _stamp(surface: tree_mod.SurfaceSpec, tree: tree_mod.Tree, persona: str) -> 
     if (
         c2 in surface.always_on
         and profile.persona.protocols
-        and not _PERSONA_SECTION_RX.search(out.get(c2, ""))
+        and not re.search(r"##\s*persona\s*:\s*protocols\b", out.get(c2, ""), re.I)
     ):
         lines = ["## Protocols (non-negotiable)"]
         lines += [f"{i + 1}. {rule}" for i, rule in enumerate(profile.persona.protocols)]

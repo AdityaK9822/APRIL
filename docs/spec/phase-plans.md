@@ -579,6 +579,41 @@ ocean assigns, far stays free, no-vector stays no-vector, dry-run is
 byte-identical on disk, re-run is idempotent, CLI precondition message fires on
 empty apply). `git -C ZCode status --porcelain` empty.
 
+### P7-4 — Multi-seed sweep driver (landed 2026-11-04)
+
+`core/harness/schedule.py`: `run_sweep(..., seeds=...)` (and the zcode wrapper)
+now take seeds as a driver parameter instead of relying on a caller loop — the
+unchanged single-seed path runs once per entry and the returned report is one
+aggregate with `per_seed` / `results_by_seed`, a shared `library_root`, and
+per-seed R/P ledger rows (namespaces keep their `-s<seed>` segment); `seeds=None`
+(default) takes the byte-identical seedless branch. Self-check: 27 ok lines
+(two seeds, one task, stub + `_DryProposer`, both namespace directories with
+exact R=4k/P=3k ledgers at 2 dims, aggregate carries both, seedless branch is a
+plain sweep). `git -C ZCode status --porcelain` empty.
+
+### P7-5 — ZCODE-surface boot (landed 2026-11-04)
+
+`core/ade/boot.py` and `_stamp` in `core/ade/deploy.py` now resolve c1 (system
+prompt) / c2 (guardrails) by ROLE against `SurfaceSpec.always_on` instead of
+the hardcoded `systemprompt.md` / `guardrails.md`: APRIL keeps its two per-role
+files; the zcode surface folds both halves into the single `AGENTS.md`, so a
+zcode deployment stamps `## persona: compiled` AND `## persona: protocols`
+into that file (stamp guards now check the specific section headings, not just
+any `## persona:` heading, so c2 is no longer suppressed once c1 lands in a
+shared file) and boot resolves the role resolution, returning non-empty c1 with
+the compiled persona sections and guardrails derived from the profile when there
+is no distinct guardrails file. An unresolvable (empty `always_on`) surface and
+a deployed persona with an empty system prompt raise loudly rather than
+booting empty. The P6 empty-c1 ponytail (boot reading the APRIL surface's c1/c2
+file names for every surface) is retired; the evidence reference in
+`runs/zcode-zcode-agg1-Pfacetride/p6-facet-engine-leg.md` is now a historical
+note. Self-check: 28 ok lines (zcode deploy+boot yields non-empty c1 with
+compiled persona sections + `## Protocols`; APRIL deploy+boot under the same
+resolution path is a regression guard). `python3 -m core.agent` green at 28
+ok; `git -C ZCode status --porcelain` empty.
+
+
+
 ---
 
 ## Superseded documents (removed 2026-10-31, preserved in git history)

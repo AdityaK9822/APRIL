@@ -1913,6 +1913,72 @@ if __name__ == '__main__':
         "the seedless branch (byte-identical contract held)"
     )
 
+    # 24. P7-5: ZCODE-surface boot (retire the empty-c1 ponytail). Deploy + boot
+    # on BOTH surfaces must resolve c1/c2 by role. The APRIL path stays on the
+    # persona files it always used; the zcode surface (one AGENTS.md file) stamps
+    # and boots both halves out of that same file.
+    from core.ade import deploy as ade_deploy2, load_deployed as load_deployed2
+    from core.ade.boot import boot as ade_boot2
+    from core.substrate.april import APRIL_SURFACE as _AS
+    from core.substrate.zcode import ZCODE_SURFACE as _ZS
+    from core.harness import runmark
+
+    ztmp = Path(tempfile.mkdtemp(prefix="april-p75-zcode-"))
+    zaderoot = ztmp / ".ade"
+    old_ade_root = os.environ.get("APRIL_ADE_ROOT")
+    os.environ["APRIL_ADE_ROOT"] = str(zaderoot)
+    try:
+        zrow = ade_deploy2(
+            Path.cwd() / "core" / "harness" / "basetree" / "zcode",
+            surface=_ZS,
+            persona="april",
+            domain="default",
+            task_id="demo/demo-0001",
+        )
+        zfdir = zaderoot / "harnesses" / "april" / "default"
+        z_agents = (zfdir / "AGENTS.md").read_text(encoding="utf-8")
+        assert "## persona: compiled" in z_agents, "zcode deployment did not stamp the persona"
+        assert "## persona: protocols" in z_agents, "zcode deployment did not stamp the protocols"
+        zboot = ade_boot2("april", domain="default", surface=_ZS)
+        assert zboot.source == "deployed:default", zboot.source
+        assert "## Personality (OCEAN)" in zboot.system_prompt, zboot.system_prompt[:200]
+        assert "## Facet directives" not in zboot.system_prompt or "## Personality" in zboot.system_prompt
+        assert "## Protocols" in zboot.guardrails, zboot.guardrails[:200]
+        # Non-empty c1 with compiled persona sections.
+        assert len(zboot.system_prompt) > 200, len(zboot.system_prompt)
+        assert runmark.fingerprint(zaderoot / "harnesses" / "april" / "default") == zrow["fingerprint"], "zcode fingerprint must match deployment row"
+
+        # APRIL path: deploy + boot unchanged by role resolution (regression guard).
+        # Use a separate ADE root so the APRIL deployment does not overwrite the
+        # zcode one (one persona/domain slot per deploy).
+        aroot = ztmp / "ade-april"
+        aroot.mkdir(parents=True, exist_ok=True)
+        os.environ["APRIL_ADE_ROOT"] = str(aroot)
+        ar = ade_deploy2(
+            Path.cwd() / "core" / "harness" / "basetree" / "april",
+            surface=_AS,
+            persona="april",
+            domain="default",
+            task_id="demo/april-0001",
+        )
+        aboot = ade_boot2("april", domain="default", surface=_AS)
+        assert aboot.system_prompt.startswith("# APRIL"), aboot.system_prompt[:40]
+        assert "## Personality (OCEAN)" in aboot.system_prompt
+        assert "## Protocols" in aboot.guardrails
+        assert runmark.fingerprint(aroot / "harnesses" / "april" / "default") == ar["fingerprint"]
+    finally:
+        if old_ade_root is None:
+            os.environ.pop("APRIL_ADE_ROOT", None)
+        else:
+            os.environ["APRIL_ADE_ROOT"] = old_ade_root
+        shutil.rmtree(ztmp, ignore_errors=True)
+    checks.append(
+        "P7-5 zcode boot: ZCODE-surface deploy stamps both -- persona: compiled "
+        "and -- persona: protocols into AGENTS.md; boot resolves c1/c2 by role and "
+        "yields non-empty c1 with compiled persona sections + guardrails on the "
+        "zcode surface, and the APRIL surface stays byte-identical (regression)"
+    )
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")
