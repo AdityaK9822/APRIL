@@ -465,6 +465,29 @@ Acceptance: `python3 -m core.agent` is green at **20 `ok:` lines** (incl. the bu
 cross-check) with no model / no network / no device; `git -C ZCode status
 --porcelain` stays empty; the TS reference is untouched by diff.
 
+**Engine leg proven offline (same day, docs-only commit):** beyond the pin seams,
+the facet grain ran through the *real engine* on the zcode substrate — a 1-task
+agg sweep (`process-boundary` stub, dry executor, k=1) under namespace
+`zcode-zcode-agg1-Pfacetride`: row `status ok`, mode `ok=True`, `finals=[agg1]`,
+every stage falling back only for the documented dry reason (never a facet
+reason), ledger **R=5, P=4, n_dims=3 exact**, four `.adapt_complete` markers each
+with a deliverable, `selection.json ok=True`, and `library_root/_library/facetride`
+scoped per profile (no lesson files this dry run). The resume path also showed
+the runmark fingerprint machinery skipping the completed run on re-invocation —
+unaffected by grain. ADE interop: a persona-free APRIL base tree deployed at an
+isolated leg ADE root (`runs/_p6-leg-ade`, never the repo `.ade`) with
+`persona=facetride`, booted offline at `source=deployed:default` with the
+**facet-derived temperature (0.62, equal to the ocean twin's `derive()`)** and the
+compiled c1 carrying `## Personality (OCEAN)` + `## Facets` (with the half-up
+artifact `fantasy 59 (openness)` visible). Evidence tree:
+`runs/zcode-zcode-agg1-Pfacetride/p6-facet-engine-leg.md` (git-ignored). Two
+loose ends are pinned by observation, not by change: boot.py reads the APRIL
+surface's c1/c2 file names, so a ZCODE-surface deployment boots with empty c1
+text (`# ponytail:` the ADE runtime host is APRIL; revisit when a zcode-hosted
+runtime exists); and the legacy-lesson backfill stays deferred — no real legacy
+library exists yet (one doc-sample row in `EXPERIENCE.md`, no `.ade/library`),
+exactly the precondition the deferral named.
+
 ---
 
 ## Superseded documents (removed 2026-10-31, preserved in git history)
