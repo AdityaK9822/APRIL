@@ -8,7 +8,8 @@ from typing import List, Dict, Optional, Callable, AsyncGenerator, Any
 import json
 import threading
 import os
-from openai import OpenAI
+import uuid
+from openai import OpenAI, AsyncOpenAI
 
 from .config import AgentConfig
 from .session import Session
@@ -199,6 +200,10 @@ class AgentRuntime:
             api_key=config.api_key,
             base_url=config.api_base_url
         )
+        self.async_client = AsyncOpenAI(
+            api_key=config.api_key,
+            base_url=config.api_base_url
+        )
         
         # Initialize memory system
         self.db = None
@@ -332,7 +337,7 @@ class AgentRuntime:
         
         # Log user message
         truncated = user_input[:100] + "..." if len(user_input) > 100 else user_input
-        self._event_bus.emit(LogEvent(level="INFO", source="user", message=truncated))
+        self._event_bus.emit_log(level="INFO", source="user", message=truncated)
         
         # Augment context with relevant memories
         self._augment_context_with_memories(user_input)
@@ -347,7 +352,7 @@ class AgentRuntime:
         iterations = 0
         while iterations < max_iterations:
             # Log LLM request
-            self._event_bus.emit(LogEvent(level="INFO", source="llm", message=f"Request to {self.config.model} ({len(self.session.context)} messages)"))
+            self._event_bus.emit_log(level="INFO", source="llm", message=f"Request to {self.config.model} ({len(self.session.context)} messages)")
             
             # Call LLM
             response = self.client.chat.completions.create(
@@ -360,7 +365,7 @@ class AgentRuntime:
             message = response.choices[0].message
             
             # Log LLM response
-            self._event_bus.emit(LogEvent(level="INFO", source="llm", message=f"Response from {self.config.model}"))
+            self._event_bus.emit_log(level="INFO", source="llm", message=f"Response from {self.config.model}")
             
             # Check if we need to process tool calls
             if message.tool_calls:
@@ -386,7 +391,7 @@ class AgentRuntime:
                 # Log tool executions
                 for result in tool_results:
                     tool_name = result.get('name', 'unknown')
-                    self._event_bus.emit(LogEvent(level="INFO", source="tool", message=f"Calling: {tool_name}"))
+                    self._event_bus.emit_log(level="INFO", source="tool", message=f"Calling: {tool_name}")
                 
                 # Add tool results to context
                 for result in tool_results:
@@ -405,7 +410,7 @@ class AgentRuntime:
                 self._extract_and_store_memories()
             
             # Log agent response
-            self._event_bus.emit(LogEvent(level="INFO", source="agent", message=final_response[:100] + "..." if len(final_response) > 100 else final_response))
+            self._event_bus.emit_log(level="INFO", source="agent", message=final_response[:100] + "..." if len(final_response) > 100 else final_response)
             
             return final_response
         
@@ -465,11 +470,11 @@ class AgentRuntime:
             if not messages:
                 return
             
-            self._event_bus.emit(LogEvent(level="DEBUG", source="memory", message=f"Extracting memories from {len(messages)} messages"))
+            self._event_bus.emit_log(level="DEBUG", source="memory", message=f"Extracting memories from {len(messages)} messages")
             
             memories = self.extractor.extract(messages, client=self.client)
             
-            self._event_bus.emit(LogEvent(level="DEBUG", source="memory", message=f"Extracted {len(memories)} memories"))
+            self._event_bus.emit_log(level="DEBUG", source="memory", message=f"Extracted {len(memories)} memories")
             
             # Store memories
             for memory in memories:
@@ -486,7 +491,7 @@ class AgentRuntime:
             message_ids = [m['id'] for m in messages]
             self.db.mark_processed(message_ids)
             
-            self._event_bus.emit(LogEvent(level="DEBUG", source="memory", message=f"Marked {len(message_ids)} messages as processed"))
+            self._event_bus.emit_log(level="DEBUG", source="memory", message=f"Marked {len(message_ids)} messages as processed")
             
         except Exception as e:
             self._emit_error("memory_extraction", str(e))
@@ -509,7 +514,7 @@ class AgentRuntime:
     def clear_context(self) -> None:
         """Clear conversation context."""
         self.session.clear()
-        self._event_bus.emit(LogEvent(level="INFO", source="session", message="Context cleared"))
+        self._event_bus.emit_log(level="INFO", source="session", message="Context cleared")
     
     def get_context_summary(self) -> Dict:
         """
@@ -529,114 +534,148 @@ class AgentRuntime:
     async def run_streaming(self, user_input: str, max_iterations: Optional[int] = None) -> AsyncGenerator[str, None]:
         """
         Async streaming version of run.
-        
-        Yields tokens as they arrive from the model.
+
+        Yields tokens as they arrive from the model. Uses the async OpenAI
+        client so HTTP streaming does not block the event loop.
         """
         if max_iterations is None:
             max_iterations = self.config.max_iterations
-        
-        # Emit start events
+
         msg_id = self._event_bus.emit_message_start(is_assistant=True)
         self._event_bus.emit_status("thinking", {"user_input": user_input[:50]})
-        
-        # Log user message
+
         truncated = user_input[:100] + "..." if len(user_input) > 100 else user_input
-        self._event_bus.emit(LogEvent(level="INFO", source="user", message=truncated))
-        
-        # Augment context
+        self._event_bus.emit_log(level="INFO", source="user", message=truncated)
+
         self._augment_context_with_memories(user_input)
         self._save_conversation_turn('user', user_input)
         self.session.add_message('user', user_input)
-        
-        # Agent loop
+
         iterations = 0
         while iterations < max_iterations:
-            # Emit status
             self._event_bus.emit_status("streaming" if iterations == 0 else "running_tool")
-            
-            # Log LLM request
-            self._event_bus.emit(LogEvent(level="INFO", source="llm", message=f"Request to {self.config.model} ({len(self.session.context)} messages)"))
-            
-            # Call LLM
-            response = self.client.chat.completions.create(
-                model=self.config.model,
-                messages=self.session.context,
-                tools=self.tool_schemas,
-                temperature=self.config.temperature,
-                stream=True  # Enable streaming
+            self._event_bus.emit_log(
+                level="INFO",
+                source="llm",
+                message=f"Request to {self.config.model} ({len(self.session.context)} messages)",
             )
-            
-            full_response = ""
-            for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    token = chunk.choices[0].delta.content
-                    full_response += token
-                    yield token
-                    self._event_bus.emit_message_delta(token, is_assistant=True, is_complete=False)
-            
-            # Complete message
+
+            accumulated_content = ""
+            accumulated_tools = {}
+            finish_reason = None
+
+            try:
+                stream = await self.async_client.chat.completions.create(
+                    model=self.config.model,
+                    messages=self.session.context,
+                    tools=self.tool_schemas,
+                    temperature=self.config.temperature,
+                    stream=True,
+                )
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    finish_reason = choice.finish_reason or finish_reason
+                    delta = choice.delta
+                    if getattr(delta, "content", None):
+                        token = delta.content
+                        accumulated_content += token
+                        yield token
+                        self._event_bus.emit_message_delta(token, is_assistant=True, is_complete=False)
+                    if getattr(delta, "tool_calls", None):
+                        for tc in delta.tool_calls:
+                            entry = accumulated_tools.setdefault(tc.index, {
+                                "id": tc.id or "",
+                                "name": "",
+                                "arguments": "",
+                            })
+                            if tc.id:
+                                entry["id"] = tc.id
+                            if getattr(tc.function, "name", None):
+                                entry["name"] += tc.function.name
+                            if getattr(tc.function, "arguments", None):
+                                entry["arguments"] += tc.function.arguments
+            except Exception as exc:
+                self._event_bus.emit_error("llm_stream", str(exc))
+                self._event_bus.emit_status("idle")
+                yield f"Error: {exc}"
+                return
+
             self._event_bus.emit_message_delta("", is_assistant=True, is_complete=True)
-            
-            # Check for tool calls in final message
-            message = response.choices[0].message if hasattr(response, 'choices') else None
-            if not message:
-                # Get from accumulated chunks
-                message = type('obj', (object,), {
-                    'content': full_response,
-                    'tool_calls': None
-                })()
-            
-            if message.tool_calls:
-                # Tool calls - emit start
-                self._event_bus.emit_status("running_tool", {"tool_calls": len(message.tool_calls)})
-                
-                for tc in message.tool_calls:
-                    tool_name = tc.function.name
-                    tool_args = json.loads(tc.function.arguments)
-                    self._event_bus.emit_tool_call_start(tool_name, tool_args, tc.id)
-                
-                # Process tool calls
-                tool_results = self._process_tool_calls(message.tool_calls)
-                
+
+            tool_calls = []
+            for _index, entry in sorted(accumulated_tools.items()):
+                if entry["name"]:
+                    tool_calls.append(entry)
+
+            if tool_calls:
+                pseudo_calls = []
+                for entry in tool_calls:
+                    tc = type("ToolCall", (), {})()
+                    tc.id = entry["id"] or str(uuid.uuid4())[:8]
+                    tc.function = type("Function", (), {})()
+                    tc.function.name = entry["name"]
+                    tc.function.arguments = entry["arguments"] or "{}"
+                    pseudo_calls.append(tc)
+
+                self._event_bus.emit_status("running_tool", {"tool_calls": len(pseudo_calls)})
+                for tc in pseudo_calls:
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError:
+                        args = {}
+                    self._event_bus.emit_tool_call_start(tc.function.name, args, tc.id)
+
+                tool_results = self._process_tool_calls(pseudo_calls)
+
                 for result in tool_results:
-                    tool_name = result.get('name', 'unknown')
-                    self._event_bus.emit_tool_call_output(result.get('tool_call_id', ''), f"Result from {tool_name}")
-                    self._event_bus.emit_tool_call_done(tool_name, result.get('content', ''), result.get('tool_call_id', ''), True)
-                
-                # Add to context
+                    tool_name = result.get("name", "unknown")
+                    self._event_bus.emit_tool_call_output(
+                        result.get("tool_call_id", ""),
+                        str(result.get("content", ""))[:500],
+                    )
+                    self._event_bus.emit_tool_call_done(
+                        tool_name,
+                        str(result.get("content", "")),
+                        result.get("tool_call_id", ""),
+                        True,
+                    )
+
                 self.session.context.append({
-                    'role': 'assistant',
-                    'content': message.content,
-                    'tool_calls': [
+                    "role": "assistant",
+                    "content": accumulated_content,
+                    "tool_calls": [
                         {
-                            'id': tc.id,
-                            'type': 'function',
-                            'function': {'name': tc.function.name, 'arguments': tc.function.arguments}
-                        } for tc in message.tool_calls
-                    ]
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in pseudo_calls
+                    ],
                 })
-                
                 for result in tool_results:
                     self.session.context.append(result)
-                
+
                 iterations += 1
                 continue
-            
-            # No tool calls
-            self.session.add_message('assistant', full_response)
-            
-            if full_response:
-                self._save_conversation_turn('assistant', full_response)
+
+            self.session.add_message("assistant", accumulated_content)
+            if accumulated_content:
+                self._save_conversation_turn("assistant", accumulated_content)
                 self._extract_and_store_memories()
-            
-            self._event_bus.emit_message_done(msg_id, full_response, is_assistant=True)
+
+            self._event_bus.emit_message_done(msg_id, accumulated_content, is_assistant=True)
             self._event_bus.emit_status("idle")
-            
             return
-        
+
         self._event_bus.emit_status("idle")
-        yield f'Reached maximum iterations ({max_iterations}) without completing.'
-    
+        yield f"Reached maximum iterations ({max_iterations}) without completing."
+
+
     # Thread-safe cancellation support
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -1775,6 +1814,17 @@ if __name__ == '__main__':
         "P7-1 facet directives: facet grain compiles behavior into the mission slot "
         "(## Facet directives above the data block; 4 lines, - trust (veryHigh): "
         "needle); ocean grain renders none"
+    )
+
+    # 22. P7-3: the legacy backfill, inert. Pure synthetic pins (nearest_profile
+    # gate, assign/stay-transferable/stay-free, dry-run writes nothing, idempotent
+    # re-run); apply() refuses when nothing is profileable; no real data written.
+    from core.harness import backfill as backfill_mod
+    backfill_mod.demo()
+    checks.append(
+        "P7-3 backfill: synthetic mix exercises assign / stay-transferable / "
+        "stay-free; dry-run writes nothing; re-run is idempotent; apply refuses "
+        "empty input; runs on fixtures only (inert)"
     )
 
     for line in checks:

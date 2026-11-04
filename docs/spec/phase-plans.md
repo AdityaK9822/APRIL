@@ -560,6 +560,25 @@ Self-check stays 25 `ok:` lines: P7-2 extends the existing bun cross-check on
 the demo line, it does not add a new named pin. `git -C ZCode status
 --porcelain` empty.
 
+### P7-3 — Legacy-lesson backfill (landed 2026-11-04)
+
+`core/harness/backfill.py` implements the assign / skip / keep-free logic on
+in-memory row dicts and never rewrites real data: `nearest_profile(lesson_ocean,
+profiles)` (cosine, `SIMILARITY_FLOOR` gate; tie-broken by lowest id; None when
+no profile is close enough or the vector is missing/unparseable),
+`plan_backfill(rows, profiles)`, `apply_backfill(..., dry_run=True)` (the
+default writes nothing; `--apply` writes a `.backfill-plan.json` side-car in
+the library root), plus a CLI (`--rows/--profiles/--library-root/--apply`). Accepts
+a sequence of profile ids OR an explicit mapping; coerces `O70 C90 ...` ocean rows
+and 0..100 / 0..1 scales; rows already carrying a `profile` are skipped
+(idempotency); `apply` raises when nothing is profileable, so the deferral's
+precondition is executable, not a silent no-op. Spec: `ocean-profile-schema.md`
+§9 now records the backfill as "implemented but unrun" rather than "absent".
+Self-check: 26 ok lines (P7-3 named pin, synthetic fixtures only — near-APRIL
+ocean assigns, far stays free, no-vector stays no-vector, dry-run is
+byte-identical on disk, re-run is idempotent, CLI precondition message fires on
+empty apply). `git -C ZCode status --porcelain` empty.
+
 ---
 
 ## Superseded documents (removed 2026-10-31, preserved in git history)

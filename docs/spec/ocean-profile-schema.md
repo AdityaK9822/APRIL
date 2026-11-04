@@ -310,4 +310,8 @@ is authored per profile. The scale-out contract holds at both grains.
 | `ridealong` | 60 55 50 85 15 | P4 scale-out proof: low N, high A, mid E; one file, zero code |
 
 Deferred and deliberately absent: a nearest-profile backfill for legacy library
-lessons. (Per-facet band directives — `FACET_CONDITIONS`, §7 — landed in P7-1.)
+lessons — IMPLEMENTED but UNRUN (`core/harness/backfill.py`: `nearest_profile`,
+`plan_backfill`, `apply_backfill(dry_run=True)`; refuses to apply when no
+profileable rows exist, so the empty-library deferral stays an executable
+precondition, not a silent no-op; verified on synthetic fixtures only).
+(Per-facet band directives — `FACET_CONDITIONS`, §7 — landed in P7-1.)
