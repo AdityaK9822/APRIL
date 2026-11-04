@@ -1726,6 +1726,57 @@ if __name__ == '__main__':
         "unknown facet names are refused at load"
     )
 
+    # 21. P7-1: facet-conditioned directives. The ridealong-shaped facet twin's
+    # (s-1, s) pairs put A in veryHigh and N in veryLow, so exactly four
+    # directive lines ride the mission slot, above the data block; the
+    # ocean-grain original renders no facet section at all.
+    ftwin = personality.persona_from_dict(
+        {
+            "name": "DirectiveTwin",
+            "facets": {
+                "fantasy": 59, "aesthetics": 60,
+                "order": 54, "competence": 55,
+                "warmth": 49, "gregariousness": 50,
+                "trust": 84, "straightforwardness": 85,
+                "anxiety": 14, "angry_hostility": 15,
+            },
+        }
+    )
+    old_load = personality.load_profile
+    personality.load_profile = lambda name, profiles_dir=None: ftwin  # type: ignore[assignment]
+    try:
+        dadapt = type(
+            "DirectiveAdapter",
+            (),
+            {
+                "spec": type(
+                    "DirectiveSpec",
+                    (),
+                    {"profile": "directivetwin", "prompts": type(zres_p)()},
+                )()
+            },
+        )()
+        dprompts = resolve_prompts(dadapt, t0)
+    finally:
+        personality.load_profile = old_load  # type: ignore[assignment]
+    pg = dprompts.persona_guidance
+    assert "## Facet directives" in pg and "## Facets" in pg, "facet directives must ride the mission slot"
+    assert pg.index("## Facet directives") < pg.index("## Facets"), pg
+    dsec = pg[pg.index("## Facet directives") :]
+    dcut = dsec.find("\n## ", 1)
+    dsec = dsec[: dcut if dcut != -1 else len(dsec)]
+    dlines = [ln for ln in dsec.splitlines()[1:] if ln.strip()]
+    assert len(dlines) == 4, dlines
+    assert any(ln.startswith("- trust (veryHigh): ") for ln in dlines), dlines
+    assert any(ln.startswith("- anxiety (veryLow): ") for ln in dlines), dlines
+    oprompts = resolve_prompts(ZcodeAdapter(profile="ridealong"), t0)
+    assert "## Facet" not in oprompts.persona_guidance, "ocean grain must not emit a facet section"
+    checks.append(
+        "P7-1 facet directives: facet grain compiles behavior into the mission slot "
+        "(## Facet directives above the data block; 4 lines, - trust (veryHigh): "
+        "needle); ocean grain renders none"
+    )
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")

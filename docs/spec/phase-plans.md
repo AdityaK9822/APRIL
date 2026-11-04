@@ -491,6 +491,56 @@ exactly the precondition the deferral named.
 
 ---
 
+## P7 — Finishing pass (facet directives first)
+
+The last layer: give facet grain its payload, mirror it to the TS archive, then
+close the loose ends P6 named. Spec and behavior in one change per item.
+
+### P7-1 — Facet-conditioned directives (landed 2026-11-04)
+
+`FACET_CONDITIONS` (`core/harness/personality.py`) maps each of the 30 facets to
+one behavioral clause per non-mid band (`veryLow/low/high/veryHigh`). Design
+invariants:
+
+- **`mid` emits nothing** — the domain `DIRECTIVES` table already owns moderate
+  behavior; a facet line there would only duplicate it and spend persona budget.
+- **Registry order governs the render.** Both facet sections render in
+  `FACET_MAP` order (keep-first on duplicate facet pairs), so JSON key order
+  never leaks into compiled text — a rebuild in any key order compiles
+  byte-identically.
+- **Section shape:** `## Facet directives` (`- name (band): clause` lines)
+  renders above the `## Facets` data block, only in the non-degraded branch.
+  Partial vectors keep the P4 authored-only contract; ocean grain renders no
+  facet section at all.
+- **Loud ceiling:** `FACET_DIRECTIVE_CAP` (3000 chars) is enforced in
+  `validate()` against the rendered section — table growth over the cap refuses
+  loudly instead of silently inflating every mission. The shipped table's worst
+  case (all 30 facets outside mid) renders 2656, so P6's "full coverage
+  compiles" contract cannot break silently. # ponytail: the cap is a
+  self-judged boundary against this section becoming a second system prompt.
+- **Loud gaps:** a missing `FACET_CONDITIONS` entry for a rendered band raises
+  from `facet_directives` (silence would be truncation); `validate()` turns it
+  into a validate error. Bands share `bandOf`'s edges exactly (20/40/60/80); no
+  facet-specific thresholds exist, by contract.
+- **Zero plumbing changes:** the compiled persona is the mission slot's only
+  source (`spec.resolve_prompts` fills `persona_guidance`), so directives ride
+  every profile-backed mission automatically; the PSY/ledger seams stay
+  untouched and grain-blind.
+- **TS mirror deferred (P7-2):** `personality.ts` remains the verbatim pre-P6
+  archive; the bun cross-check keeps pinning ocean-grain profiles only.
+
+Contract: `docs/spec/ocean-profile-schema.md` §5 (cap bullet), §7 "Compiled
+shape" (rewritten), §8 (facet grain compiles directives with zero authoring),
+§9 (FACET_CONDITIONS off the deferred list). Pins: `personality.demo()` gains a
+ten-pin facet-directive block (registry completeness, worst-case ≤ cap, mid
+silence, divergent render + section placement, band-edge sweep, key-order leak,
+dedupe, facet-twin 4-line render, ocean/degraded silence, loud cap refusal);
+`core/agent.py` self-check 21 proves the mission-slot seam (facet grain → 4
+directive lines through `resolve_prompts`, ocean grain → none). Self-checks:
+25 ok lines, offline.
+
+---
+
 ## Superseded documents (removed 2026-10-31, preserved in git history)
 
 - Root: `IMPLEMENTATION.md`

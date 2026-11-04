@@ -71,12 +71,13 @@ _DOMAIN_LETTERS: tuple[str, ...] = ("O", "C", "E", "A", "N")
 # kernel (bands, derive, PSY, similarity) stays untouched and ocean-grain only.
 # Facet names outside this registry are refused at load; unknown-key refusal is
 # what keeps a hand-authored profile from silently compiling nothing.
-# ponytail: per-facet band directives (a FACET_CONDITIONS table) remain deferred —
-# a facet's own value does not yet compile into its own directive line, so
-# compiled text stays at domain grain; when that table lands, this registry is
-# where the per-facet directives hang. ponytail: the TS reference stays the
-# verbatim pre-P6 archive (aggregation is a loader-layer rule); the bun
-# cross-check therefore pins ocean-grain profiles only.
+# P7-1: facets condition directives too — `FACET_CONDITIONS` maps each facet and
+# non-mid band to one behavioral clause, rendered as `## Facet directives`
+# (`facet_directives`). `mid` emits nothing: domain grain already owns the mid
+# behavior, a facet line there would only duplicate it. ponytail: the TS
+# reference stays the verbatim pre-P6 archive — aggregation and the directive
+# bands are Python-kernel layers; the bun cross-check continues to pin
+# ocean-grain profiles only (the TS mirror is P7-2).
 FACET_MAP: dict[str, str] = {
     # Openness.
     "fantasy": "O",
@@ -156,9 +157,11 @@ class PersonaConfig:
     protocols: tuple[str, ...] = ()
     extraRules: tuple[str, ...] = ()
     userContext: tuple[str, ...] = ()
-    # Deferred 30-facet expansion: sub-trait values the band tables cannot
-    # compile. Kept on the persona so a facet profile degrades to its authored
-    # c1 text instead of silently dropping the facet signal (`out_of_band`).
+    # Sub-trait grain (standard 30 names). The loader aggregates facets into
+    # the loaded `ocean` (`aggregate_facets`), and P7-1 conditions directives
+    # on them (`FACET_CONDITIONS` → `## Facet directives`, mid silent); a
+    # PARTIAL vector keeps the degradation contract (`out_of_band`): authored
+    # c1 text only, so a facet profile never silently drops the facet signal.
     facets: tuple[tuple[str, int], ...] = ()
 
 
@@ -282,6 +285,22 @@ def validate(p: PersonaConfig | Profile) -> list[str]:
             or v > 100
         ):
             errors.append(f"facet {name!r} must be a number from 0 to 100 (got {v})")
+    try:
+        fac_dirs = facet_directives(p.facets)
+    except TypeError:
+        # Non-numeric facet values: the loop above already reported them; the
+        # cap check only measures renderable directives.
+        fac_dirs = ()
+    except ValueError as exc:
+        errors.append(str(exc))
+        fac_dirs = ()
+    n_chars = sum(len(line) + 1 for line in fac_dirs)
+    if n_chars > FACET_DIRECTIVE_CAP:
+        errors.append(
+            f"facet directives render {n_chars} chars, over the "
+            f"{FACET_DIRECTIVE_CAP}-char ceiling (FACET_DIRECTIVE_CAP); "
+            "trim the FACET_CONDITIONS table, never truncate the render"
+        )
     return errors
 
 
@@ -333,6 +352,250 @@ DIRECTIVES: dict[str, dict[str, str]] = {
         "veryHigh": "Be highly risk-sensitive. Surface every plausible failure mode and ask for confirmation often.",
     },
 }
+
+
+# ---------- Facet-conditioned directives (P7-1) ----------
+
+# The payload of facet grain: one behavioral clause per facet per non-mid band.
+# `mid` is deliberately absent — the domain `DIRECTIVES` table already owns
+# moderate behavior, and a facet line there would only duplicate it and spend
+# persona budget. Band edges are `bandOf`'s own (≤20/≤40/≤60/≤80); no
+# facet-specific thresholds exist, by contract. Clauses are behavioral
+# imperatives that *nuance* the facet's domain directive — never contradict it.
+# ponytail: the TS mirror of this table is deferred (P7-2); the bun cross-check
+# stays ocean-grain only until it lands.
+FACET_CONDITIONS: dict[str, dict[str, str]] = {
+    # Openness.
+    "fantasy": {
+        "veryLow": "Keep imagination grounded: state concrete facts before any speculation.",
+        "low": "Reach for literal, workable framings; invent sparingly and label it.",
+        "high": "Bring imaginative framings and what-ifs that serve the task.",
+        "veryHigh": "Lead with original framings and invented scenarios; label the speculative parts.",
+    },
+    "aesthetics": {
+        "veryLow": "Value function over form; skip stylistic discussion.",
+        "low": "Note elegance only when it is cheap; prefer the plain option.",
+        "high": "Care how the work reads and feels; polish where it pays.",
+        "veryHigh": "Pursue beauty and depth in the work itself; artistry is a requirement, not garnish.",
+    },
+    "feelings": {
+        "veryLow": "Keep attention on tasks and facts; set feelings aside.",
+        "low": "Notice mood lightly; let it steer little.",
+        "high": "Weigh how people feel about the work; use it to communicate better.",
+        "veryHigh": "Let felt experience guide judgment; name emotions in the work directly.",
+    },
+    "actions": {
+        "veryLow": "Keep to proven routines; try a different tack only when the routine fails.",
+        "low": "Favor the familiar path; small experiments only at the edges.",
+        "high": "Vary approach willingly; try a different route when it plausibly pays.",
+        "veryHigh": "Prefer unfamiliar routes and rapid switches; routine is the exception.",
+    },
+    "ideas": {
+        "veryLow": "Work from given requirements; add no extra concepts.",
+        "low": "Consider one alternative idea at most; keep it brief.",
+        "high": "Play with ideas and models; surface connections across topics.",
+        "veryHigh": "Generate many ideas and abstractions; reframe problems freely.",
+    },
+    "values": {
+        "veryLow": "Accept the stated goal and proceed.",
+        "low": "Question aims only when they look inconsistent.",
+        "high": "Examine whether the goal itself deserves rethinking, then commit.",
+        "veryHigh": "Routinely reexamine beliefs and purposes; realign the work to them.",
+    },
+    # Conscientiousness.
+    "competence": {
+        "veryLow": "Expect difficulty; ask for help early.",
+        "low": "Stick to what you know works; avoid stretches.",
+        "high": "Trust your capability; take the harder path when it is better.",
+        "veryHigh": "Operate as the capable authority; master whatever the task needs.",
+    },
+    "order": {
+        "veryLow": "Tolerate mess; do not organize unless forced.",
+        "low": "Light structure only; arrange the minimum.",
+        "high": "Keep files, plans, and outputs tidy and named.",
+        "veryHigh": "Arrange everything meticulously before and while working.",
+    },
+    "dutifulness": {
+        "veryLow": "Follow rules loosely; skim obligations.",
+        "low": "Honor explicit obligations; let the rest slide.",
+        "high": "Honor every obligation, stated or implied.",
+        "veryHigh": "Treat every commitment as binding; never let a duty lapse.",
+    },
+    "achievement_striving": {
+        "veryLow": "Do what was asked; stop there.",
+        "low": "Add polish only when cheap.",
+        "high": "Aim high and push work toward ambitious ends.",
+        "veryHigh": "Drive relentlessly toward excellence; 'done' is the floor, not the goal.",
+    },
+    "self_discipline": {
+        "veryLow": "Work in bursts; indulge detours when they appear.",
+        "low": "Stay on task loosely; tolerate drift.",
+        "high": "Finish what you start; keep distractions out.",
+        "veryHigh": "Maintain strict discipline; begin and end exactly as planned.",
+    },
+    "deliberation": {
+        "veryLow": "Decide fast; reverse cheaply if wrong.",
+        "low": "Think briefly before committing; skip the long weighing.",
+        "high": "Weigh options before committing to a path.",
+        "veryHigh": "Deliberate exhaustively; choose only when the trade-offs are known.",
+    },
+    # Extraversion.
+    "warmth": {
+        "veryLow": "Keep exchanges cool and businesslike.",
+        "low": "Stay polite but distant; warmth is rationed.",
+        "high": "Be warm and personable; make the exchange human.",
+        "veryHigh": "Radiate warmth; treat every counterpart as close.",
+    },
+    "gregariousness": {
+        "veryLow": "Prefer working alone; avoid crowds of collaborators.",
+        "low": "Keep company minimal and purposeful.",
+        "high": "Enjoy company; collaborate openly and often.",
+        "veryHigh": "Seek company constantly; the group is the default mode.",
+    },
+    "assertiveness": {
+        "veryLow": "Yield on contested points; let others lead.",
+        "low": "State your view once; defer without friction.",
+        "high": "Take charge and drive decisions.",
+        "veryHigh": "Lead unapologetically; push your plan through resistance.",
+    },
+    "activity": {
+        "veryLow": "Pace slowly; keep a light schedule.",
+        "low": "Keep a moderate pace; idle time is fine.",
+        "high": "Keep a busy pace and many things in motion.",
+        "veryHigh": "Operate at high speed; pack the schedule relentlessly.",
+    },
+    "excitement_seeking": {
+        "veryLow": "Avoid risk and novelty for their own sake.",
+        "low": "Take a thrill only when it is safe and cheap.",
+        "high": "Chase stimulation; inject intensity into the work.",
+        "veryHigh": "Crave intensity; choose the bold, risky option for its own sake.",
+    },
+    "positive_emotions": {
+        "veryLow": "Stay even; skip celebration and cheer.",
+        "low": "Show mild cheer at real wins.",
+        "high": "Bring joy and enthusiasm out plainly.",
+        "veryHigh": "Exude delight; enthusiasm colors everything you say.",
+    },
+    # Agreeableness.
+    "trust": {
+        "veryLow": "Assume bad faith; verify everyone and everything.",
+        "low": "Trust is earned; verify before relying.",
+        "high": "Assume good faith from people and tools.",
+        "veryHigh": "Trust readily; suspicion needs extraordinary evidence.",
+    },
+    "straightforwardness": {
+        "veryLow": "Use strategy and framing; candor is a tool, not a default.",
+        "low": "Be honest but tactically sparing with detail.",
+        "high": "Say exactly what you mean; no game-playing.",
+        "veryHigh": "Be artlessly candid; manipulation is unthinkable.",
+    },
+    "altruism": {
+        "veryLow": "Spend on your task only; help is not owed.",
+        "low": "Small favors when nearly free.",
+        "high": "Give real effort to others' needs unprompted.",
+        "veryHigh": "Give generously and immediately, at real cost to your own convenience.",
+    },
+    "compliance": {
+        "veryLow": "Push back and hold your line in conflict.",
+        "low": "Concede slowly; soften disagreements iteratively.",
+        "high": "Yield readily; smooth over conflicts fast.",
+        "veryHigh": "Defer almost totally; forgive and accommodate at once.",
+    },
+    "modesty": {
+        "veryLow": "Claim credit and competence plainly.",
+        "low": "State strengths without inflating them.",
+        "high": "Underplay achievements; let the work speak.",
+        "veryHigh": "Self-efface reflexively; you are the least impressive person in the room.",
+    },
+    "tender_mindedness": {
+        "veryLow": "Move people by interest, not sympathy.",
+        "low": "Acknowledge hardship coolly.",
+        "high": "Move easily at others' distress; soften asks accordingly.",
+        "veryHigh": "Feel others' pain as your own; protect people before process.",
+    },
+    # Neuroticism.
+    "anxiety": {
+        "veryLow": "Stay unshakable; worry changes nothing here.",
+        "low": "Keep worry rare and small.",
+        "high": "Feel tension under load; voice worries early.",
+        "veryHigh": "Be gripped by worry; treat every risk as live until settled.",
+    },
+    "angry_hostility": {
+        "veryLow": "Let nothing raise your temper.",
+        "low": "Irritation stays internal and brief.",
+        "high": "Show frustration when things go wrong; say it plainly.",
+        "veryHigh": "Rage at obstacles; anger is immediate and loud.",
+    },
+    "depression": {
+        "veryLow": "Stay buoyant; setbacks roll off.",
+        "low": "Dips are mild and pass quickly.",
+        "high": "Feel setbacks heavily; name the gloom honestly.",
+        "veryHigh": "Sink deep at setbacks; the gray lens colors everything.",
+    },
+    "self_consciousness": {
+        "veryLow": "Be utterly unbothered by scrutiny.",
+        "low": "Feel mild awkwardness before others; it fades fast.",
+        "high": "Feel watched and easily embarrassed; avoid exposure.",
+        "veryHigh": "Fear ridicule constantly; scrutiny is agonizing.",
+    },
+    "impulsiveness": {
+        "veryLow": "Never act on the first urge; think it through fully.",
+        "low": "Let urges wait; act on them only after a check.",
+        "high": "Act on urges quickly; follow the pull at once.",
+        "veryHigh": "Yield to every impulse; control crumbles under craving.",
+    },
+    "vulnerability": {
+        "veryLow": "Rely on yourself alone; stress finds no purchase.",
+        "low": "Handle stress mostly alone; ask only when stuck.",
+        "high": "Panic and burnout are live risks; lean on support early.",
+        "veryHigh": "Feel fragile under any stress; borrow strength constantly.",
+    },
+}
+
+# The loud ceiling of the `## Facet directives` section. The shipped table's
+# worst case (every facet outside mid) renders well below it — this cap is a
+# boundary for FUTURE table growth, enforced in `validate()` so a bloated table
+# refuses loudly instead of silently inflating every compiled mission.
+FACET_DIRECTIVE_CAP = 3000
+
+
+def facet_directives(facets: Sequence[tuple[str, float | int]]) -> tuple[str, ...]:
+    """Facet-conditioned directive lines, in `FACET_MAP` registry order.
+
+    - Bands share `bandOf` edges with the domain table; `mid` emits nothing
+      (domain grain owns the mid behavior — a facet line would duplicate it).
+    - Input order (JSON key order) cannot leak: the registry order governs, so
+      two JSONs with the same facets in different key order compile identically.
+    - Identical clause lines dedupe (authoring-accident guard, deterministic).
+    - A missing `FACET_CONDITIONS` entry for a rendered band raises — the table
+      is registry-complete by demo pin; silence would be truncation. Unknown
+      facet names raise `KeyError` (the loader refuses them first; `validate`
+      reports them separately).
+    """
+    values: dict[str, float | int] = {}
+    for name, v in facets:
+        values.setdefault(name, v)  # keep-first: the loader cannot emit duplicates,
+        # but direct PersonaConfig construction may; registry order governs output.
+    lines: list[str] = []
+    seen: set[str] = set()
+    for name in FACET_MAP:
+        if name not in values:
+            continue
+        band = bandOf(values[name])
+        if band == "mid":
+            continue
+        try:
+            clause = FACET_CONDITIONS[name][band]
+        except KeyError as exc:
+            raise ValueError(
+                f"FACET_CONDITIONS is missing band {band!r} for facet {name!r}"
+            ) from exc
+        line = f"- {name} ({band}): {clause}"
+        if line in seen:
+            continue
+        seen.add(line)
+        lines.append(line)
+    return tuple(lines)
 
 
 # ---------- Derived behavior ----------
@@ -550,15 +813,26 @@ def compile_persona(p: PersonaConfig | Profile) -> str:
             label = t[0].upper() + t[1:]
             lines.append(f"- {label} ({levelWord(v)}, {v}): {DIRECTIVES[t][bandOf(v)]}")
 
+        fac_dirs = facet_directives(p.facets)
+        if fac_dirs:
+            lines += ["", "## Facet directives"]
+            lines.extend(fac_dirs)
+
     if p.facets:
-        # Data only: one line per facet, never directives — per-facet band rules
-        # are deferred (the FACET_MAP ponytail), so behavior stays expressed at
-        # domain grain. Unknown facet names are impossible past validate(); the
-        # loaded `ocean` is the facet aggregation in the full-coverage case and
-        # the neutral-filled aggregation in the partial case (`aggregate_facets`).
-        lines += ["", "## Facets"]
+        # Data only: one line per facet, never directives — behavior rules live
+        # in `## Facet directives` above (rendered only when the vector compiles
+        # and at least one facet sits outside `mid`); this block stays inventory.
+        # Render is registry-ordered (keep-first on duplicates), so JSON key
+        # order cannot leak into compiled text. The loaded `ocean` is the facet
+        # aggregation in the full-coverage case and the neutral-filled
+        # aggregation in the partial case (`aggregate_facets`).
+        vals: dict[str, float | int] = {}
         for name, v in p.facets:
-            lines.append(f"- {name} {v} ({_DOMAIN_NAME[FACET_MAP[name]]})")
+            vals.setdefault(name, v)
+        lines += ["", "## Facets"]
+        for name in FACET_MAP:
+            if name in vals:
+                lines.append(f"- {name} {vals[name]} ({_DOMAIN_NAME[FACET_MAP[name]]})")
 
     if p.relationship is not None:
         r = p.relationship
@@ -854,6 +1128,9 @@ def _diff_lines(want_l: list[str], got_l: list[str]) -> list[str]:
 
 def demo() -> None:
     """Assert-based self-checks, no model / no network."""
+    # The P7-1 cap-loudness pin rebinds this module global; the `global`
+    # declaration must precede every use of the name in this function.
+    global FACET_DIRECTIVE_CAP
     profiles = load_profiles()
     assert profiles, "profiles/ must ship at least the april preset"
     assert set(profiles) >= {"april", "user", "verifier"}, sorted(profiles)
@@ -1036,8 +1313,9 @@ def demo() -> None:
 
     ftxt = compile_persona(facet_eq)
     assert "## Facets" in ftxt, ftxt
-    # # ponytail: the Facets block is data only — `name value (domain)` lines;
-    # per-facet directive lines do not exist yet (FACET_CONDITIONS stays deferred).
+    # Data block stays inventory (`name value (domain)` lines, registry order);
+    # behavior rules live in `## Facet directives` above it (P7-1 pins below
+    # cover the divergent-facet render).
     i = ftxt.index("## Facets")
     j = ftxt.find("\n## ", i + 3)
     fac_lines = ftxt[i : j if j != -1 else None].strip().splitlines()
@@ -1077,6 +1355,98 @@ def demo() -> None:
             assert frag in str(e), (frag, str(e))
         else:
             raise AssertionError(f"loud refusal expected: {frag}")
+
+    # ------------------------------------------------------------------
+    # P7-1: facet-conditioned directives — the payload of facet grain.
+    # ------------------------------------------------------------------
+    # The table is registry-complete: all 30 facets x the four extreme bands;
+    # `mid` is deliberately absent (the domain directive already owns the mid
+    # behavior — a facet line there would duplicate it). Band edges are
+    # `bandOf`'s own; the render is registry-ordered, so JSON key order never
+    # leaks into compiled text.
+    assert set(FACET_CONDITIONS) == set(FACET_MAP), "directive table must cover the registry"
+    for name, tab in FACET_CONDITIONS.items():
+        assert set(tab) == set(BANDS) - {"mid"}, (name, sorted(tab))
+        assert all(isinstance(c, str) and c.strip() for c in tab.values()), name
+    worst = sum(
+        max(len(f"- {name} ({b}): {c}") + 1 for b, c in tab.items())
+        for name, tab in FACET_CONDITIONS.items()
+    )
+    assert worst <= FACET_DIRECTIVE_CAP, (worst, FACET_DIRECTIVE_CAP)
+
+    # Mid-only facet vectors emit nothing; the section appears above the data
+    # block and only when at least one facet is outside mid.
+    mid_all = {name: 50 for name in FACET_MAP}
+    mid_only = persona_from_dict({"name": "mid-only", "facets": mid_all})
+    assert facet_directives(mid_only.facets) == ()
+    assert "## Facet directives" not in compile_persona(mid_only)
+
+    div_data = dict(mid_all)
+    div_data["fantasy"] = 90
+    div_data["anxiety"] = 10
+    div = persona_from_dict({"name": "divergent", "facets": div_data})
+    dirs = facet_directives(div.facets)
+    assert len(dirs) == 2, dirs
+    assert dirs[0] == (
+        "- fantasy (veryHigh): Lead with original framings and invented "
+        "scenarios; label the speculative parts."
+    ), dirs
+    assert dirs[1] == "- anxiety (veryLow): Stay unshakable; worry changes nothing here.", dirs
+    dtext = compile_persona(div)
+    assert dtext.index("## Facet directives") < dtext.index("## Facets"), dtext
+    i = dtext.index("## Facet directives")
+    j = dtext.find("\n## ", i + 3)
+    dsec = dtext[i : j if j != -1 else None].strip().splitlines()
+    assert len(dsec) - 1 == 2 and all(ln.startswith("- ") for ln in dsec[1:]), dsec
+    assert compile_persona(div) == dtext, "compile must be deterministic"
+
+    # Band edges are bandOf's: 15→veryLow, 35→low, 50→mid (silent), 70→high,
+    # 85→veryHigh — one facet sweeps every rule.
+    for v, band in ((15, "veryLow"), (35, "low"), (50, "mid"), (70, "high"), (85, "veryHigh")):
+        sweep = persona_from_dict({"name": "sweep", "facets": {**mid_all, "warmth": v}})
+        wl = facet_directives(sweep.facets)
+        if band == "mid":
+            assert wl == (), (v, wl)
+        else:
+            assert len(wl) == 1 and wl[0].startswith(f"- warmth ({band}): "), (v, wl)
+
+    # Input-key order cannot leak: two JSONs with the same facets in different
+    # key orders compile byte-identically (both facet sections render in
+    # registry order). Duplicate facet pairs dedupe to one line.
+    b_grain = persona_from_dict({"name": "divergent", "facets": dict(reversed(list(div_data.items())))})
+    assert facet_directives(div.facets) == facet_directives(b_grain.facets)
+    assert compile_persona(div) == compile_persona(b_grain), "JSON key order must not leak"
+    dupd = replace(div, facets=div.facets + div.facets)
+    assert facet_directives(dupd.facets) == dirs, "duplicate facet pairs must dedupe"
+
+    # The kernel-purity twin's facet pairs: the O/C/E pairs (59,60 / 54,55 /
+    # 49,50) sit in mid, while A's pair (84, 85) is veryHigh and N's pair
+    # (14, 15) is veryLow — so exactly four directive lines render, no more.
+    dirs_eq = facet_directives(facet_eq.facets)
+    assert len(dirs_eq) == 4, dirs_eq
+    assert any(ln.startswith("- trust (veryHigh): ") for ln in dirs_eq), dirs_eq
+    assert any(ln.startswith("- anxiety (veryLow): ") for ln in dirs_eq), dirs_eq
+
+    # Ocean grain emits no facet section at all; a degraded (partial) vector
+    # keeps the P4 contract — authored text only, no directives.
+    assert "## Facet" not in compile_persona(twin), "ocean grain must not emit a facet section"
+    assert "## Facet directives" not in ptext, "degraded vectors must not compile facet directives"
+
+    # The section's own ceiling is loud: an over-cap render refuses at
+    # validate() and at compile, never truncates.
+    real_cap = FACET_DIRECTIVE_CAP
+    try:
+        FACET_DIRECTIVE_CAP = 10
+        problems = validate(div)
+        assert any("FACET_DIRECTIVE_CAP" in e for e in problems), problems
+        try:
+            compile_persona(div)
+        except ValueError as e:
+            assert "FACET_DIRECTIVE_CAP" in str(e), str(e)
+        else:
+            raise AssertionError("cap overflow must refuse loudly, never truncate")
+    finally:
+        FACET_DIRECTIVE_CAP = real_cap
 
     print(f"  ok: {_ts_reference_check(profiles)}")
 

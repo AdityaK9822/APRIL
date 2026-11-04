@@ -144,6 +144,9 @@ raises `ValueError` with them joined. Rules:
 - `candorFloor` in `[0, 100]` when present.
 - Every facet name in the standard 30, every facet value finite and in `[0, 100]`,
   and `ocean`/`facets` mutually exclusive (§7).
+- When the vector compiles, the rendered `## Facet directives` section must fit the
+  harness ceiling `FACET_DIRECTIVE_CAP` (§7): an over-cap render is a validate error —
+  the table is trimmed, never the render truncated.
 - No unknown keys (§2).
 - No `userContext` in a committed profile (`allow_user_context=False` is the default).
 
@@ -216,12 +219,30 @@ identical derived parameters — pinned in `personality.demo()` against
 
 ### Compiled shape
 
-A profile carrying facets renders one extra **data-only** section in the compiled
-block, one line per facet (`- name value (domain)`), immediately after the
-personality section. It is an elaboration of the grain the profile carries, never
-behavior rules. # ponytail: per-facet band directives (a `FACET_CONDITIONS` table)
-remain deferred — a facet's own value does not yet compile into its own directive
-line, so behavior stays expressed at domain grain only.
+A facet vector that compiles renders two facet sections, both **registry-ordered**
+(`FACET_MAP` order — JSON key order never leaks into compiled text; duplicate facet
+pairs keep the first value):
+
+- `## Facet directives` — behavior, one line per facet whose band is outside `mid`
+  (`- name (band): clause`), rendered **above** the data block and only in the
+  non-degraded branch. Bands share the domain table's `bandOf` edges; **`mid` emits
+  nothing** — the domain directive already owns moderate behavior, and a facet line
+  there would only duplicate it and spend persona budget. Example: a vector at 50
+  everywhere with `fantasy: 90`, `anxiety: 10` gains exactly two lines
+  (`- fantasy (veryHigh): …`, `- anxiety (veryLow): …`). Clauses come from the
+  harness-owned `FACET_CONDITIONS` table (all 30 facets × the four extreme bands);
+  a missing entry for a rendered band raises — silence would be truncation.
+- `## Facets` — the data block, unchanged: one line per facet
+  (`- name value (domain)`), inventory, never rules.
+
+Ocean-grain profiles render no facet section at all. The section carries its own
+loud ceiling: the rendered directives must fit `FACET_DIRECTIVE_CAP` (3000 chars,
+enforced in `validate()` — the table is trimmed, never the render truncated), and
+the shipped table's worst case (all 30 facets outside `mid`) renders well under it,
+so the "full coverage compiles" contract above cannot break on table growth without
+a loud refusal. # ponytail: the cap is a self-judged boundary against this section
+becoming a second system prompt; the TS mirror of the table is P7-2, so the bun
+cross-check keeps pinning ocean-grain profiles only.
 
 ### Degradation (partial facet coverage)
 
@@ -230,8 +251,9 @@ degrades instead of inventing trait directives from domains with no facet eviden
 
 - `compile_persona` emits the authored c1 text only: identity, role, relationship,
   protocols, `extraRules` — plus the `## Facets` data section. The OCEAN directive
-  block, derived Voice/Honesty lines, and threshold rules are withheld, replaced by a
-  one-line "express the traits above through behavior" note.
+  block, the `## Facet directives` section, derived Voice/Honesty lines, and
+  threshold rules are withheld, replaced by a one-line "express the traits above
+  through behavior" note.
 - `out_of_band()` names the missing domains as the reason.
 - `psy_mechanism` returns `""`, so `active_dims` stays `("INV", "DOM")` and the ledger
   keeps `R = 4k`, `P = 3k`. Learning over levers that the compiler cannot express
@@ -270,7 +292,8 @@ future extra dimensions are the documented edge.
 ```
 
 A facet-grain profile swaps `ocean` for `facets` (§7): same file weight, same loader,
-zero code — the scale-out contract holds at both grains.
+zero code — its per-facet directives compile from the harness-owned table, so nothing
+is authored per profile. The scale-out contract holds at both grains.
 
 ## 9. Reference profiles
 
@@ -281,5 +304,5 @@ zero code — the scale-out contract holds at both grains.
 | `verifier` | 35 95 45 55 60 | High structure/caution, high candor floor |
 | `ridealong` | 60 55 50 85 15 | P4 scale-out proof: low N, high A, mid E; one file, zero code |
 
-Deferred and deliberately absent: per-facet band directives (a `FACET_CONDITIONS`
-table, §7), and a nearest-profile backfill for legacy library lessons.
+Deferred and deliberately absent: a nearest-profile backfill for legacy library
+lessons. (Per-facet band directives — `FACET_CONDITIONS`, §7 — landed in P7-1.)
