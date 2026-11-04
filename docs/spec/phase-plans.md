@@ -405,6 +405,68 @@ are runtime state; known cosmetic noise from user-owned `memory_extractor.py`).
 
 ---
 
+## P6 — 30-facet Big Five expansion (facet grain becomes a legal second shape)
+
+The plan's first deferred item, taken after P0–P5 closed. Spec first, then the
+kernel, then pins — behavior and the contract doc in one change.
+
+The profile format now has two grains, mutually exclusive at load: `ocean` (the
+five domains) and `facets` (the standard NEO-PI-R 30, `FACET_MAP` in
+`core/harness/personality.py`). Facet values aggregate to domain scores at load
+(`aggregate_facets`: each domain = rounded mean of its present facets, `_round` =
+the JS `Math.round` half-up rule the derived parameters already pin), so the
+untouched kernel still sees an ordinary five-trait vector.
+
+- **Full coverage** (≥1 facet in each of O, C, E, A, N; facets may be missing
+  inside a covered domain) compiles through the normal path — band directives,
+  derived Voice/Honesty, threshold rules, the PSY lane (`active_dims` goes 3-D),
+  ledger arithmetic — as though it were always `ocean`. `compile_persona` gains one
+  **data-only** `## Facets` section (`name value (domain)` lines) rendered in both
+  paths; per-facet directives (`FACET_CONDITIONS`) remain deferred.
+- **Partial coverage** keeps the P4 degradation: authored c1 text only, PSY off
+  (`psy_mechanism` `""`, ledger `R = 4k`, `P = 3k`), and `out_of_band()` names the
+  domains with no facet evidence as the reason.
+- Missing domains carry a **neutral 50 fill** in the loaded `ocean` vector so
+  temperature math and the cosine transfer gate stay shape-valid; the fill never
+  reaches compiled text, and an ocean+facets profile can never exist to pollute it.
+- Loader gates fail loudly: unknown facet names, `ocean`+`facets` together, or
+  neither grain — each is a `ValueError` at `persona_from_dict`/`validate`.
+
+Contract in `docs/spec/ocean-profile-schema.md` §2/§5/§7 (§7 renamed "Facet
+vectors and the degradation contract"; §9's deferred list now names the
+`FACET_CONDITIONS` table instead of the grain itself).
+
+**Pins (offline, no model/no network):** `personality.demo()` now proves the
+registry shape (30 facets, 6 per domain), and **kernel purity** — a facet profile
+built per-domain from pairs `(s-1, s)` averages to `s − 0.5` and must land exactly
+on the committed data-only profile's own scores: identical `## Personality
+(OCEAN)` section text, identical `DerivedParams`, cosine 1.0 against the twin.
+The twin is selected without spelling its id — the P4 zero-code scan reads
+`core/harness/*.py` raw and forbids the name, so the harness still mentions no
+third profile. Partial-coverage pins, the data-only Facets block pins, and the
+three loud-refusal pins live in the same demo. Self-check 20 (agent-level) runs
+the facet grain through the real seams: a `facetride` profile in a tmp profiles
+dir compiles identically to its ocean twin through `compile_persona` and through
+`resolve_prompts` (`persona_guidance` carries the OCEAN block + `## Facets`,
+`psy_levers` non-empty, `active_dims == ("INV", "DOM", "PSY")`), with the loader
+refusals pinned through `profile_from_path`. Check 17 (the P4 degradation seam)
+was reworked for the mutual exclusion — its facets now ride a facet-only
+construction — with its assertions unchanged.
+
+`# ponytail:` facets left open on purpose: the per-facet `FACET_CONDITIONS`
+directive table (a facet's own value compiling into its own band line), a TS
+mirror of the aggregation (the archive stays the verbatim pre-P6 reference; the
+bun cross-check pins ocean-grain only), and no committed facet-grain profile —
+`demo()` constructs facet profiles in tmp dirs only, because committed profiles
+are asserted to compile `## Voice`/`## Honesty` and a facet profile would only
+coincidentally do so.
+
+Acceptance: `python3 -m core.agent` is green at **20 `ok:` lines** (incl. the bun
+cross-check) with no model / no network / no device; `git -C ZCode status
+--porcelain` stays empty; the TS reference is untouched by diff.
+
+---
+
 ## Superseded documents (removed 2026-10-31, preserved in git history)
 
 - Root: `IMPLEMENTATION.md`

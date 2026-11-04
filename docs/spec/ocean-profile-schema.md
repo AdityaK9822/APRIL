@@ -39,10 +39,11 @@ library directory name. Use `[a-z0-9_-]+`.
 | `protocols` | string[] | no | Non-negotiable rules; compiled into the persona block and machine-checked post-selection where decidable |
 | `extraRules` | string[] | no | Authored working rules, compiled verbatim |
 | `userContext` | string[] | no | **Refused in committed profiles** — personal facts belong in the git-ignored `.ade/etc/persona-user-context.md` override |
-| `facets` | object | no | Deferred 30-facet expansion; values 0–100. Presence degrades the profile (§7) |
+| `facets` | object | no | Facet-grain vector: the 30 standard names from §7, values 0–100. Mutually exclusive with `ocean`; aggregates to OCEAN at load (§7) |
 
-Unknown top-level keys, unknown `ocean` traits, and unknown `relationship` keys are
-refused at load time. A typo must fail loudly rather than silently compile nothing.
+Unknown top-level keys, unknown `ocean` traits, unknown facet names, and unknown
+`relationship` keys are refused at load time, and `ocean` and `facets` are mutually
+exclusive (§7). A typo must fail loudly rather than silently compile nothing.
 
 ### `ocean`
 
@@ -137,10 +138,12 @@ derived levers and never re-derives traits.
 `validate(persona)` returns a list of human-readable problems; `profile_from_path`
 raises `ValueError` with them joined. Rules:
 
-- All five traits present, finite, `0 ≤ v ≤ 100`.
+- All five `ocean` traits present, finite, `0 ≤ v ≤ 100` (a `facets`-grain profile
+  resolves `ocean` at load; §7).
 - `relationship.friend + relationship.butler == 1` (±0.001) when present.
 - `candorFloor` in `[0, 100]` when present.
-- Every facet value finite and in `[0, 100]`.
+- Every facet name in the standard 30, every facet value finite and in `[0, 100]`,
+  and `ocean`/`facets` mutually exclusive (§7).
 - No unknown keys (§2).
 - No `userContext` in a committed profile (`allow_user_context=False` is the default).
 
@@ -161,24 +164,87 @@ Committed profiles at the floor (values are stable, pinned by self-checks):
 | april ↔ user | 0.9667 | yes |
 | april ↔ verifier | 0.9111 | no |
 
-## 7. Degradation contract (out-of-band vectors)
+## 7. Facet vectors and the degradation contract
 
-The band tables cover exactly the five OCEAN traits. A profile that carries signal
-outside that grid — today, `facets` — is still **loadable** and still runs; it degrades
-instead of failing or lying:
+The band tables cover exactly the five OCEAN traits at domain grain. A profile may
+also describe itself at the standard 30-facet Big Five grain: `ocean` and `facets`
+are mutually exclusive (both describe the same vector, so a contradiction between
+them could never be detected — a profile carrying both keys is refused at load, not
+merged).
+
+### The 30 facets
+
+Standard NEO-PI-R names, grouped by domain (`FACET_MAP` in
+`core/harness/personality.py`). A facet name outside this set is refused at load:
+
+- **Openness**: fantasy, aesthetics, feelings, actions, ideas, values
+- **Conscientiousness**: competence, order, dutifulness, achievement_striving,
+  self_discipline, deliberation
+- **Extraversion**: warmth, gregariousness, assertiveness, activity,
+  excitement_seeking, positive_emotions
+- **Agreeableness**: trust, straightforwardness, altruism, compliance, modesty,
+  tender_mindedness
+- **Neuroticism**: anxiety, angry_hostility, depression, self_consciousness,
+  impulsiveness, vulnerability
+
+### Aggregation (facet grain → domain grain)
+
+Facet values aggregate to domain scores **before** the untouched kernel,
+`personality.ts`, stays the verbatim reference; the bun cross-check keeps pinning
+ocean-grain profiles only. # ponytail: the TS archive remains the pre-P6
+verbatim text — aggregation is a loader-layer rule here.
+
+- A domain's score is the rounded mean of its **present** facets — `_round`, the
+  same JS `Math.round` half-up rule the derived parameters use. A domain that sits
+  exactly on a `.5` mean rounds up, and the kernel-purity pin below depends on it.
+- Domain scores are placed into the profile's loaded `ocean` vector, so every
+  existing mechanism — band directives, derived Voice/Honesty, the PSY lane
+  (`psy_mechanism`, `derive()`), ledger arithmetic (`n_dims`), cosine retrieval —
+  works unchanged.
+- **Full coverage** = at least one facet in each of O, C, E, A, N. Facets may be
+  missing *inside* a covered domain (the mean of the present ones still lands).
+- **Partial coverage** keeps the loadable vector defined by filling each missing
+  domain with the neutral midpoint 50. The fill never reaches compiled text, because
+  partial coverage degrades (below); it only keeps temperature math and the transfer
+  gate shape-valid. An ocean+facets profile can never exist, so `ocean` is never
+  polluted at source.
+
+Kernel purity: a facet profile whose per-domain facet means equal an ocean profile's
+five scores produces the **identical** `## Personality (OCEAN)` section text and
+identical derived parameters — pinned in `personality.demo()` against
+`profiles/ridealong.json` through `.5` means on every domain.
+
+### Compiled shape
+
+A profile carrying facets renders one extra **data-only** section in the compiled
+block, one line per facet (`- name value (domain)`), immediately after the
+personality section. It is an elaboration of the grain the profile carries, never
+behavior rules. # ponytail: per-facet band directives (a `FACET_CONDITIONS` table)
+remain deferred — a facet's own value does not yet compile into its own directive
+line, so behavior stays expressed at domain grain only.
+
+### Degradation (partial facet coverage)
+
+A facet vector that does **not** cover all five domains still **loads and runs**, but
+degrades instead of inventing trait directives from domains with no facet evidence:
 
 - `compile_persona` emits the authored c1 text only: identity, role, relationship,
-  protocols, `extraRules`. The OCEAN directive block, derived Voice/Honesty lines, and
-  threshold rules are withheld, replaced by a one-line “express the traits above through
-  behavior” note.
+  protocols, `extraRules` — plus the `## Facets` data section. The OCEAN directive
+  block, derived Voice/Honesty lines, and threshold rules are withheld, replaced by a
+  one-line "express the traits above through behavior" note.
+- `out_of_band()` names the missing domains as the reason.
 - `psy_mechanism` returns `""`, so `active_dims` stays `("INV", "DOM")` and the ledger
-  keeps `R = 4k`, `P = 3k`. Learning over levers that the compiler cannot express would
-  be a silent mismatch.
-- The ceiling is marked in code with `# ponytail:` naming the deferred 30-facet
-  expansion (`personality.out_of_band`).
+  keeps `R = 4k`, `P = 3k`. Learning over levers that the compiler cannot express
+  would be a silent mismatch.
 
-Tested-band vectors — every profile whose vector is five OCEAN traits — compile with no
-code changes. Facets and future extra dimensions are the documented edge.
+A many-facet profile approaches the mission persona cap (`tree.PERSONA_CLAUSE_CAP`)
+faster than a five-line ocean vector; the P2 cap contract governs unchanged
+(cap violation → retry → authored fallback). # ponytail: the real ceiling is the
+runtime token budget — revisit when one exists.
+
+Tested-band vectors — every profile whose vector is five OCEAN traits or
+full-coverage facets — compile with no code changes. Partial facet coverage and
+future extra dimensions are the documented edge.
 
 ## 8. Adding a profile
 
@@ -203,6 +269,9 @@ code changes. Facets and future extra dimensions are the documented edge.
 }
 ```
 
+A facet-grain profile swaps `ocean` for `facets` (§7): same file weight, same loader,
+zero code — the scale-out contract holds at both grains.
+
 ## 9. Reference profiles
 
 | id | O C E A N | Notes |
@@ -212,5 +281,5 @@ code changes. Facets and future extra dimensions are the documented edge.
 | `verifier` | 35 95 45 55 60 | High structure/caution, high candor floor |
 | `ridealong` | 60 55 50 85 15 | P4 scale-out proof: low N, high A, mid E; one file, zero code |
 
-Deferred and deliberately absent: 30-facet Big Five expansion (§7), and a
-nearest-profile backfill for legacy library lessons.
+Deferred and deliberately absent: per-facet band directives (a `FACET_CONDITIONS`
+table, §7), and a nearest-profile backfill for legacy library lessons.

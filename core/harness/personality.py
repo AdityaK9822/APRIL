@@ -13,9 +13,16 @@ what P3's PSY dimension will learn over.
 
 P4 makes the scale-out contract explicit: a profile is data. Every vector that is
 five OCEAN traits compiles with no code. A vector carrying signal the band tables
-cannot express (currently `facets`, the deferred 30-facet expansion) still loads
-and runs, but degrades to its authored c1 guidance with the PSY lane off —
-`out_of_band()` names the reason, never a silent approximation.
+cannot express still loads and runs, but degrades to its authored c1 guidance with
+the PSY lane off — `out_of_band()` names the reason, never a silent approximation.
+
+P6 promotes the facet grain to first-class: the standard 30 Big Five facets
+(`FACET_MAP`) are a second legal profile shape — mutually exclusive with `ocean`,
+unknown names refused, values 0–100 — aggregated to domain scores at load
+(`aggregate_facets`). Full facet coverage compiles through the untouched kernel
+like any ocean-grain profile; partial coverage keeps the P4 degradation and names
+the domains with no facet evidence. The facet registry and the compiled-shape
+contract live in §7 of docs/spec/ocean-profile-schema.md.
 
 JS `Math.round` rounds half UP; python's built-in `round` is banker's, so every
 derived integer goes through `_round` = `math.floor(x + 0.5)`. This is
@@ -53,6 +60,59 @@ _LETTER = {
     "extraversion": "E",
     "agreeableness": "A",
     "neuroticism": "N",
+}
+
+_DOMAIN_NAME: dict[str, str] = {L: t for t, L in _LETTER.items()}
+_DOMAIN_LETTERS: tuple[str, ...] = ("O", "C", "E", "A", "N")
+
+# P6: the standard 30-facet Big Five registry (standard NEO-PI-R names). A profile
+# describes itself at ONE grain — `ocean` domains or `facets` sub-traits — never
+# both; the loader aggregates facets to domain scores (`aggregate_facets`) so the
+# kernel (bands, derive, PSY, similarity) stays untouched and ocean-grain only.
+# Facet names outside this registry are refused at load; unknown-key refusal is
+# what keeps a hand-authored profile from silently compiling nothing.
+# ponytail: per-facet band directives (a FACET_CONDITIONS table) remain deferred —
+# a facet's own value does not yet compile into its own directive line, so
+# compiled text stays at domain grain; when that table lands, this registry is
+# where the per-facet directives hang. ponytail: the TS reference stays the
+# verbatim pre-P6 archive (aggregation is a loader-layer rule); the bun
+# cross-check therefore pins ocean-grain profiles only.
+FACET_MAP: dict[str, str] = {
+    # Openness.
+    "fantasy": "O",
+    "aesthetics": "O",
+    "feelings": "O",
+    "actions": "O",
+    "ideas": "O",
+    "values": "O",
+    # Conscientiousness.
+    "competence": "C",
+    "order": "C",
+    "dutifulness": "C",
+    "achievement_striving": "C",
+    "self_discipline": "C",
+    "deliberation": "C",
+    # Extraversion.
+    "warmth": "E",
+    "gregariousness": "E",
+    "assertiveness": "E",
+    "activity": "E",
+    "excitement_seeking": "E",
+    "positive_emotions": "E",
+    # Agreeableness.
+    "trust": "A",
+    "straightforwardness": "A",
+    "altruism": "A",
+    "compliance": "A",
+    "modesty": "A",
+    "tender_mindedness": "A",
+    # Neuroticism.
+    "anxiety": "N",
+    "angry_hostility": "N",
+    "depression": "N",
+    "self_consciousness": "N",
+    "impulsiveness": "N",
+    "vulnerability": "N",
 }
 
 
@@ -155,6 +215,41 @@ def persona_of(p: PersonaConfig | Profile) -> PersonaConfig:
     return p.persona if isinstance(p, Profile) else p
 
 
+def facet_domains(facets: Sequence[tuple[str, float | int]]) -> tuple[str, ...]:
+    """Domain letters a facet vector covers, in O,C,E,A,N order.
+
+    Unknown facet names raise `KeyError` — callers that take facets from JSON must
+    have validated them (`persona_from_dict` refuses them up front, `validate`
+    reports them).
+    """
+    covered = {FACET_MAP[name] for name, _ in facets}
+    return tuple(L for L in _DOMAIN_LETTERS if L in covered)
+
+
+def facet_missing_domains(facets: Sequence[tuple[str, float | int]]) -> tuple[str, ...]:
+    """Domain letters with no facet evidence, in O,C,E,A,N order."""
+    covered = set(facet_domains(facets))
+    return tuple(L for L in _DOMAIN_LETTERS if L not in covered)
+
+
+def aggregate_facets(facets: Sequence[tuple[str, float | int]]) -> Ocean:
+    """Facet grain → domain grain: each domain's score is the rounded mean of its
+    present facets (`_round`, the JS `Math.round` half-up rule the derived
+    parameters use). A domain with no facets is filled with the neutral midpoint
+    50 so the loaded vector keeps a defined shape for temperature math and the
+    transfer gate; the fill never reaches compiled text, because partial coverage
+    degrades (`out_of_band`) and ocean+facets profiles are refused at load.
+    """
+    sums: dict[str, list[float]] = {}
+    for name, v in facets:
+        sums.setdefault(FACET_MAP[name], []).append(float(v))
+    vals: list[int] = []
+    for L in _DOMAIN_LETTERS:
+        present = sums.get(L)
+        vals.append(_round(sum(present) / len(present)) if present else 50)
+    return Ocean(*vals)
+
+
 def validate(p: PersonaConfig | Profile) -> list[str]:
     p = persona_of(p)
     errors: list[str] = []
@@ -174,6 +269,11 @@ def validate(p: PersonaConfig | Profile) -> list[str]:
     if p.candorFloor is not None and (p.candorFloor < 0 or p.candorFloor > 100):
         errors.append("candorFloor must be 0 to 100")
     for name, v in p.facets:
+        if name not in FACET_MAP:
+            errors.append(
+                f"unknown facet {name!r}; expected one of the standard 30 "
+                f"({', '.join(sorted(FACET_MAP))})"
+            )
         if (
             isinstance(v, bool)
             or not isinstance(v, (int, float))
@@ -344,22 +444,27 @@ THRESHOLD_RULES: tuple[tuple[str, int, str], ...] = (
 def out_of_band(p: PersonaConfig | Profile) -> str:
     """Why the band tables cannot compile this vector; `''` means it is in band.
 
-    P4 scale-out contract: a profile is data, and the data the compiler knows is
-    the five OCEAN traits × five bands. A profile that carries facet-level
-    signal is loadable and its authored text still compiles (c1 guidance), but
-    trait directives, derived voice/honesty lines and threshold rules are
-    withheld rather than invented from traits that do not describe the vector.
-    # ponytail: 30-facet Big Five expansion is DEFERRED. When facets land they
-    # become authored table data (`FACET_CONDITIONS`) and this degradation path
-    # shrinks to genuinely unknown keys; until then a facet profile is the
-    # honest ceiling of "one JSON file, zero code".
+    P6: facet grain is first-class. A facet vector covering all five OCEAN domains
+    aggregates to a compilable band vector (`aggregate_facets` at load) and
+    compiles like any ocean-grain profile. A **partial** facet vector keeps the P4
+    degradation contract: authored c1 text only, PSY off, and the missing domains
+    named here — trait directives are withheld rather than invented from domains
+    with no facet evidence. The compiled-shape contract is §7 of
+    docs/spec/ocean-profile-schema.md.
     """
     facets = persona_of(p).facets
-    if facets:
-        names = ", ".join(name for name, _ in facets[:4])
-        more = "" if len(facets) <= 4 else f", +{len(facets) - 4} more"
-        return f"{len(facets)} facet trait(s) with no band directives ({names}{more})"
-    return ""
+    if not facets:
+        return ""
+    missing = facet_missing_domains(facets)
+    if not missing:
+        return ""
+    covered = facet_domains(facets)
+    names = ", ".join(_DOMAIN_NAME[m] for m in missing)
+    return (
+        f"facet vector covers {len(covered)} of 5 OCEAN domains; "
+        f"no facet evidence for {names} — trait directives withheld, "
+        f"authored text only"
+    )
 
 
 def psy_mechanism(p: PersonaConfig | Profile) -> str:
@@ -375,8 +480,9 @@ def psy_mechanism(p: PersonaConfig | Profile) -> str:
     p = persona_of(p)
     if out_of_band(p):
         # # ponytail: the PSY lane learns over derive() levers, which are only
-        # meaningful when the vector compiles to band directives. A facet profile
-        # keeps PSY off (2-dim ledger) until the facet tables are authored.
+        # meaningful when the vector compiles to band directives. A partial
+        # facet vector keeps PSY off until it covers all five domains; unknown
+        # future dimensions degrade the same way from this single gate.
         return ""
     d = derive(p)
     lines = [
@@ -443,6 +549,16 @@ def compile_persona(p: PersonaConfig | Profile) -> str:
             v = p.ocean.cell(t)
             label = t[0].upper() + t[1:]
             lines.append(f"- {label} ({levelWord(v)}, {v}): {DIRECTIVES[t][bandOf(v)]}")
+
+    if p.facets:
+        # Data only: one line per facet, never directives — per-facet band rules
+        # are deferred (the FACET_MAP ponytail), so behavior stays expressed at
+        # domain grain. Unknown facet names are impossible past validate(); the
+        # loaded `ocean` is the facet aggregation in the full-coverage case and
+        # the neutral-filled aggregation in the partial case (`aggregate_facets`).
+        lines += ["", "## Facets"]
+        for name, v in p.facets:
+            lines.append(f"- {name} {v} ({_DOMAIN_NAME[FACET_MAP[name]]})")
 
     if p.relationship is not None:
         r = p.relationship
@@ -542,24 +658,48 @@ PERSONA_KEYS = frozenset(
 
 def persona_from_dict(data: Mapping) -> PersonaConfig:
     """Build a persona from profile JSON. Unknown keys are refused so a typo in a
-    hand-authored profile cannot silently change nothing. `facets` is accepted
-    (deferred 30-facet expansion) and is what `out_of_band` degrades on."""
+    hand-authored profile cannot silently change nothing. P6: `facets` are a
+    first-class grain — the 30 standard names only (unknown names refused),
+    mutually exclusive with `ocean`, and aggregated into the loaded `ocean`
+    (`aggregate_facets`); a partial facet vector degrades via `out_of_band`."""
     unknown = sorted(set(data) - PERSONA_KEYS)
     if unknown:
         raise ValueError(
             f"unknown profile key(s): {', '.join(unknown)}; "
             f"expected a subset of {', '.join(sorted(PERSONA_KEYS))}"
         )
-    extra_traits = sorted(set(data["ocean"]) - set(TRAITS))
-    if extra_traits:
-        raise ValueError(
-            f"unknown OCEAN trait(s): {', '.join(extra_traits)}; "
-            f"expected {', '.join(TRAITS)} (facets belong under `facets`)"
-        )
+    ocean_raw = data.get("ocean")
     facets_raw = data.get("facets") or {}
     if not isinstance(facets_raw, Mapping):
         raise ValueError("facets must be an object mapping facet names to numbers")
-    ocean = Ocean(**{t: data["ocean"][t] for t in TRAITS})
+    if ocean_raw is not None and facets_raw:
+        raise ValueError(
+            "ocean and facets are mutually exclusive: describe the profile at one "
+            "grain — five OCEAN traits, or facet names from the standard 30 (§7)"
+        )
+    facet_pairs: tuple[tuple[str, float | int], ...] = ()
+    if facets_raw:
+        extra_facets = sorted(set(facets_raw) - set(FACET_MAP))
+        if extra_facets:
+            raise ValueError(
+                f"unknown facet name(s): {', '.join(extra_facets)}; expected the "
+                f"standard 30 grouped under {', '.join(_DOMAIN_LETTERS)}"
+            )
+        facet_pairs = tuple((str(k), facets_raw[k]) for k in facets_raw)
+        ocean = aggregate_facets(facet_pairs)
+    elif ocean_raw is None:
+        raise ValueError(
+            "profile needs either `ocean` (five OCEAN traits 0-100) or `facets` "
+            "(standard facet names 0-100; §7 of docs/spec/ocean-profile-schema.md)"
+        )
+    else:
+        extra_traits = sorted(set(ocean_raw) - set(TRAITS))
+        if extra_traits:
+            raise ValueError(
+                f"unknown OCEAN trait(s): {', '.join(extra_traits)}; "
+                f"expected {', '.join(TRAITS)}"
+            )
+        ocean = Ocean(**{t: ocean_raw[t] for t in TRAITS})
     rel = data.get("relationship")
     if rel:
         unknown_rel = sorted(set(rel) - {"friend", "butler", "address", "addressWhen"})
@@ -588,7 +728,7 @@ def persona_from_dict(data: Mapping) -> PersonaConfig:
         protocols=tuple(data.get("protocols", ())),
         extraRules=tuple(data.get("extraRules", ())),
         userContext=tuple(data.get("userContext", ())),
-        facets=tuple((str(k), v) for k, v in facets_raw.items()),
+        facets=facet_pairs,
     )
 
 
@@ -811,8 +951,10 @@ def demo() -> None:
     # the harness source to prove a new id never touches code.
     assert len(profiles) >= 4, sorted(profiles)
 
-    # Out-of-band: a facet vector loads and runs, but only its authored c1 text
-    # compiles and the PSY lane stays off. The ceiling is named in `out_of_band`.
+    # Out-of-band (the P4 contract, still true in P6): a *partial* facet vector
+    # loads and runs, but only its authored c1 text compiles and the PSY lane
+    # stays off. The ceiling — the domains with no facet evidence — is named in
+    # `out_of_band`. (Full coverage compiles: pinned below.)
     faceted = replace(april, facets=(("trust", 90), ("dutifulness", 70)))
     assert out_of_band(faceted), "a facet vector must report its ceiling"
     ftext = compile_persona(faceted)
@@ -820,6 +962,7 @@ def demo() -> None:
     assert "## Personality (OCEAN)" not in ftext, "band directives leaked"
     assert "## Voice" not in ftext and "## Honesty" not in ftext, "derived lines leaked"
     assert "## Protocols (non-negotiable)" in ftext, "authored protocols must survive"
+    assert "## Facets" in ftext and "- trust 90 (agreeableness)" in ftext, (ftext, "facet data lost")
     assert psy_mechanism(faceted) == "", "PSY must not learn over an uncompilable vector"
 
     # Unknown keys are refused, so a typo cannot silently compile nothing.
@@ -834,6 +977,106 @@ def demo() -> None:
             pass
         else:
             raise AssertionError(f"unknown keys must be refused: {sorted(bad_data)}")
+
+    # P6: the facet grain is a legal second shape. The registry carries exactly
+    # the standard 30 facets, 6 per domain, and loading a facet vector
+    # aggregates it into `ocean` before the kernel sees the profile.
+    assert len(FACET_MAP) == 30
+    per_domain: dict[str, int] = {}
+    for dom in FACET_MAP.values():
+        per_domain[dom] = per_domain.get(dom, 0) + 1
+    assert per_domain == {"O": 6, "C": 6, "E": 6, "A": 6, "N": 6}, per_domain
+
+    # Kernel purity: a facet vector whose per-domain facet means equal a
+    # committed ocean-grain profile's five scores must compile byte-identically.
+    # The twin is the committed data-only profile P4 added as the scale-out
+    # proof, selected WITHOUT spelling its id — the zero-code scan below reads
+    # this file raw, and "a third persona is one JSON file" forbids the name.
+    twins = [
+        pid
+        for pid in sorted(set(profiles) - {"april", "user", "verifier"})
+        if profiles[pid].persona.facets == ()
+        and all(profiles[pid].persona.ocean.cell(t) > 0 for t in TRAITS)
+    ]
+    assert twins, (sorted(profiles), "purity needs a data-only ocean twin (facets-free, no zeros)")
+    twin = profiles[twins[0]].persona
+    assert out_of_band(twin) == "", twins[0]
+
+    # Facet pairs (s-1, s) per domain average to s - 0.5, so the half-up `_round`
+    # must land exactly on the twin's own domain scores — banker's rounding
+    # would say e.g. 54 where conscientiousness is 55. All five domains pin the
+    # edge, including a domain like 15/100.
+    pair_by_domain = {
+        "O": ("fantasy", "aesthetics"),
+        "C": ("order", "competence"),
+        "E": ("warmth", "gregariousness"),
+        "A": ("trust", "straightforwardness"),
+        "N": ("anxiety", "angry_hostility"),
+    }
+    facet_json: dict[str, int] = {}
+    for dom, (lo, hi) in pair_by_domain.items():
+        s = twin.ocean.cell(_DOMAIN_NAME[dom])
+        facet_json[lo] = s - 1
+        facet_json[hi] = s
+    facet_eq = persona_from_dict({"name": "facet-twin", "facets": facet_json})
+    assert facet_eq.ocean == twin.ocean, (facet_eq.ocean, twin.ocean)
+    assert out_of_band(facet_eq) == "", "full facet coverage must compile"
+    assert derive(facet_eq) == derive(twin), "derived params must be identical"
+    assert similarity(facet_eq, twin) == 1.0
+
+    def ocean_section(text: str) -> str:
+        i = text.index("## Personality (OCEAN)")
+        j = text.find("\n## ", i + 3)
+        return text[i : j if j != -1 else None].strip()
+
+    assert ocean_section(compile_persona(facet_eq)) == ocean_section(compile_persona(twin)), (
+        "kernel purity: identical OCEAN section for equivalent grains"
+    )
+    assert psy_mechanism(facet_eq) != "", "PSY must follow a compiled facet vector"
+
+    ftxt = compile_persona(facet_eq)
+    assert "## Facets" in ftxt, ftxt
+    # # ponytail: the Facets block is data only — `name value (domain)` lines;
+    # per-facet directive lines do not exist yet (FACET_CONDITIONS stays deferred).
+    i = ftxt.index("## Facets")
+    j = ftxt.find("\n## ", i + 3)
+    fac_lines = ftxt[i : j if j != -1 else None].strip().splitlines()
+    assert len(fac_lines) - 1 == len(facet_eq.facets), fac_lines
+    for fac_line in fac_lines[1:]:
+        assert fac_line.startswith("- ") and fac_line.endswith(")"), fac_line
+    a_lo, _ = pair_by_domain["A"]
+    assert f"- {a_lo} {twin.ocean.agreeableness - 1} (agreeableness)" in ftxt
+
+    # Partial facet coverage keeps the P4 degradation; the reason names the
+    # domains with no facet evidence, and the neutral 50-fill keeps the raw
+    # vector machinery defined without ever reaching compiled text.
+    partial = persona_from_dict({"name": "partial", "facets": {"trust": 90, "dutifulness": 70}})
+    reason = out_of_band(partial)
+    assert (
+        "no facet evidence for" in reason
+        and "openness" in reason
+        and "neuroticism" in reason
+    ), reason
+    assert partial.ocean == Ocean(50, 70, 50, 90, 50), (partial.ocean, "neutral fill rule")
+    ptext = compile_persona(partial)
+    assert "## Personality (authored)" in ptext and "## Personality (OCEAN)" not in ptext
+    assert "## Voice" not in ptext and "## Honesty" not in ptext
+    assert "## Facets" in ptext and "- trust 90 (agreeableness)" in ptext
+    assert psy_mechanism(partial) == ""
+
+    # P6 loader gates fail loudly: ocean+facets refusal, unknown facet names,
+    # and a JSON with neither grain.
+    for bad_data, frag in (
+        ({"name": "x", "ocean": base_ocean, "facets": {"trust": 90}}, "mutually exclusive"),
+        ({"name": "x", "facets": {"trust": 90, "truffle_pig": 10}}, "unknown facet name"),
+        ({"name": "x"}, "`ocean`"),
+    ):
+        try:
+            persona_from_dict(bad_data)
+        except ValueError as e:
+            assert frag in str(e), (frag, str(e))
+        else:
+            raise AssertionError(f"loud refusal expected: {frag}")
 
     print(f"  ok: {_ts_reference_check(profiles)}")
 

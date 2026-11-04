@@ -1423,6 +1423,7 @@ if __name__ == '__main__':
         odir = otmp / "profiles"
         odir.mkdir()
         odata = json.loads((Path.cwd() / "profiles" / "ridealong.json").read_text())
+        odata.pop("ocean")  # P6: ocean and facets are mutually exclusive — facet grain only
         odata["facets"] = {"trust": 90, "dutifulness": 70}
         (odir / "faceted.json").write_text(json.dumps(odata))
         faceted = personality.load_profile("faceted", odir)
@@ -1473,7 +1474,7 @@ if __name__ == '__main__':
     for needle in (
         "## 2. Fields",
         "## 3. Derived parameters",
-        "## 7. Degradation contract",
+        "## 7. Facet vectors and the degradation contract",
         "userContext",
         "SIMILARITY_FLOOR",
         "facets",
@@ -1630,6 +1631,99 @@ if __name__ == '__main__':
         "c1/c2/derived temperature (+ local facts); guard blocks unapproved public actions "
         "and secrets, attests the rest; runtime boots in one construction; view exposes "
         "counts, never fact text; from_env reads APRIL_PERSONA"
+    )
+
+    # 20. P6: facet vectors compile. A full-coverage facet profile aggregates to
+    # OCEAN at load (identical kernel output as its ocean-grain twin) and rides
+    # the same mission seams; partial coverage degrades (check 17); load-time
+    # gates refuse contradictions.
+    ptmp = Path(tempfile.mkdtemp(prefix="april-p6-facets-"))
+    try:
+        pdir = ptmp / "profiles"
+        pdir.mkdir()
+        (pdir / "facetride.json").write_text(
+            json.dumps(
+                {
+                    "name": "FacetRidealong",
+                    # pairs (s-1, s) per domain: mean s-0.5; the kernel's half-up
+                    # rounding must land on ridealong's own domain scores
+                    # (O 60, C 55, E 50, A 85, N 15).
+                    "facets": {
+                        "fantasy": 59, "aesthetics": 60,
+                        "order": 54, "competence": 55,
+                        "warmth": 49, "gregariousness": 50,
+                        "trust": 84, "straightforwardness": 85,
+                        "anxiety": 14, "angry_hostility": 15,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        fp = personality.load_profile("facetride", pdir)
+        assert personality.out_of_band(fp) == "", "full facet coverage must compile"
+        pc = personality.compile_persona(fp)
+        ride = personality.load_profile("ridealong").persona
+
+        def ocean_section(text: str) -> str:
+            i = text.index("## Personality (OCEAN)")
+            j = text.find("\n## ", i + 3)
+            return text[i : j if j != -1 else None].strip()
+
+        assert ocean_section(pc) == ocean_section(personality.compile_persona(ride)), (
+            "kernel purity failed: aggregated facets must compile identically"
+        )
+        assert personality.derive(fp) == personality.derive(ride), "derived params must match"
+        assert "## Facets" in pc and "- trust 84 (agreeableness)" in pc, "facet data block missing"
+        assert personality.psy_mechanism(fp) != "", "PSY must follow a compiled facet vector"
+
+        # Load-time gates refuse contradictions loudly (file path in, ValueError out).
+        for bad, frag in (
+            (
+                {"name": "b1", "ocean": {t: 50 for t in personality.TRAITS}, "facets": {"trust": 90}},
+                "mutually exclusive",
+            ),
+            ({"name": "b2", "facets": {"trust": 90, "truffle_pig": 10}}, "unknown facet name"),
+        ):
+            (pdir / "bad.json").write_text(json.dumps(bad), encoding="utf-8")
+            try:
+                personality.profile_from_path(pdir / "bad.json")
+            except ValueError as e:
+                assert frag in str(e), (frag, str(e))
+            else:
+                raise AssertionError(f"must refuse loudly: {frag}")
+
+        # Mission seams: the facet-grain profile goes through the same slots as
+        # any ocean-grain profile, and the PSY lane goes 3-D.
+        old_load = personality.load_profile
+        personality.load_profile = lambda name, profiles_dir=None: (  # type: ignore[assignment]
+            fp if name == "facetride" else old_load(name)
+        )
+        try:
+            padapt = type(
+                "FacetFullAdapter",
+                (),
+                {
+                    "spec": type(
+                        "FacetFullSpec",
+                        (),
+                        {"profile": "facetride", "prompts": type(zres_p)()},
+                    )()
+                },
+            )()
+            pprompts = resolve_prompts(padapt, t0)
+        finally:
+            personality.load_profile = old_load  # type: ignore[assignment]
+        assert "## Personality (OCEAN)" in pprompts.persona_guidance, pprompts.persona_guidance[:80]
+        assert "## Facets" in pprompts.persona_guidance, "facet grain must ride the mission slot"
+        assert pprompts.psy_levers != "", "resolve_prompts must activate PSY for a compiled facet vector"
+        assert harness_prompts.active_dims(pprompts) == ("INV", "DOM", "PSY"), "dims must go 3-D"
+    finally:
+        shutil.rmtree(ptmp, ignore_errors=True)
+    checks.append(
+        "P6 facets: a full-coverage facet vector aggregates to OCEAN at load — "
+        "identical compiled section + derived params vs ridealong (half-up pin), "
+        "data-only ## Facets rides the missions, PSY goes 3-D; ocean+facets and "
+        "unknown facet names are refused at load"
     )
 
     for line in checks:
