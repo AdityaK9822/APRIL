@@ -461,9 +461,10 @@ bun cross-check pins ocean-grain only), and no committed facet-grain profile —
 are asserted to compile `## Voice`/`## Honesty` and a facet profile would only
 coincidentally do so.
 
-Acceptance: `python3 -m core.agent` is green at **20 `ok:` lines** (incl. the bun
-cross-check) with no model / no network / no device; `git -C ZCode status
---porcelain` stays empty; the TS reference is untouched by diff.
+Acceptance: `python3 -m core.agent` is green at **24 `ok:` lines** (23 engine
+pins + the demo's bun TS cross-check) with no model / no network / no device;
+`git -C ZCode status --porcelain` stays empty; the TS reference is untouched by
+diff.
 
 **Engine leg proven offline (same day, docs-only commit):** beyond the pin seams,
 the facet grain ran through the *real engine* on the zcode substrate — a 1-task
