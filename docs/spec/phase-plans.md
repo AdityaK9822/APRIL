@@ -614,6 +614,25 @@ ok; `git -C ZCode status --porcelain` empty.
 
 
 
+### P7-6 — TUI view contracts (landed 2026-11-04)
+
+The visual leg: `core/ade/views.py` is and remains the only data source for TUI
+widgets (the widgets in the user-owned `core/textual_tui.py` / `core/widgets/`
+are consumers only). Added two headless pure render helpers —
+`render_persona_summary(view)` and `render_library_view(rows)` — plus a
+`surfaces_view()` catalog exposing the APRIL/ZCODE surface metadata, all
+read-only and terminal-free. The persona renderer carries counts and chars only:
+personal fact text never appears in the rendered pane (verified by the pin:
+`"fact one"` / `"fact two"` absent even when the override file carries facts).
+Self-check pin (29 ok) renders a deployed `april` persona view through the
+temp `APRIL_ADE_ROOT` and asserts the surfaces catalog, terminal-free renders,
+fact-text absence, and the empty-view fallbacks. Data contracts, not renderer
+logic, so user-owned TUI streams can absorb these without conflicts.
+`python3 -m core.agent` green at 29 ok; `git -C ZCode status --porcelain`
+empty.
+
+
+
 ---
 
 ## Superseded documents (removed 2026-10-31, preserved in git history)

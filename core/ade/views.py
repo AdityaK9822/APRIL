@@ -27,6 +27,8 @@ import re
 from pathlib import Path
 
 from ..harness.library import domain_dir
+from ..substrate.april import APRIL_SURFACE
+from ..substrate.zcode import ZCODE_SURFACE
 from .boot import ActionGuard, boot
 from .deploy import deployed_rows, deployment_root, load_deployed
 
@@ -165,4 +167,67 @@ __all__ = [
     "library_view",
     "persona_view",
     "run_selections",
+    "surfaces_view",
+    "render_persona_summary",
+    "render_library_view",
 ]
+
+
+def surfaces_view() -> list[dict]:
+    """Surface catalog the TUI can surface for selection/deployment.
+
+    Read-only metadata only — no secrets, no personal facts, no side effects.
+    """
+    out: list[dict] = []
+    for spec in (APRIL_SURFACE, ZCODE_SURFACE):
+        out.append(
+            {
+                "name": spec.name,
+                "always_on": list(spec.always_on),
+                "always_on_max": spec.always_on_max,
+                "autotrigger_file": spec.autotrigger_file,
+                "skill_dir": spec.skill_dir,
+                "reject_empty_always_on": spec.reject_empty_always_on,
+            }
+        )
+    return out
+
+
+def render_persona_summary(view: dict | None) -> str:
+    """Pure renderer for a `persona_view` result: counts and rulers, never facts.
+
+    A widget may paste this into a Textual `Static` panes; the test harness can
+    call it without a terminal.
+    """
+    if not view:
+        return "(no persona booted)"
+    lines = [
+        f"persona: {view.get('persona')}",
+        f"domain:  {view.get('domain')}  source: {view.get('source')}",
+        f"temperature: {view.get('temperature')}",
+        f"system_prompt: {view.get('system_prompt_chars', 0)} chars",
+        f"guardrails:    {view.get('guardrail_chars', 0)} chars",
+        f"machine rules: {', '.join(view.get('machine_rules') or [])}",
+        f"attested rules: {len(view.get('attested_rules') or [])}",
+        f"deployments: {len(view.get('deployments') or [])}",
+        f"user_context_facts: {view.get('user_context_facts', 0)} (count only)",
+    ]
+    fp = view.get("fingerprint")
+    if fp:
+        lines.append(f"fingerprint: {fp}")
+    return "\n".join(lines)
+
+
+def render_library_view(rows: list[dict] | None) -> str:
+    """Pure renderer for `library_view`: one line per persona/domain slot."""
+    if not rows:
+        return "(library empty)"
+    out: list[str] = []
+    for row in rows:
+        ev = row.get("entries") or []
+        cue = ev[0].get("cue") if ev and isinstance(ev[0], dict) else ""
+        out.append(
+            f"- {row.get('persona')}/{row.get('domain')}: {len(ev)} entries"
+            + (f" (cue: {cue})" if cue else "")
+        )
+    return "\n".join(out)

@@ -1979,6 +1979,45 @@ if __name__ == '__main__':
         "zcode surface, and the APRIL surface stays byte-identical (regression)"
     )
 
+    # 25. P7-6: pure (headless) view contracts. The TUI reads only what these
+    # build; render helpers run without a terminal and counts/facts discipline.
+    from core.ade import views as ade_views
+    surfaces = ade_views.surfaces_view()
+    assert [s["name"] for s in surfaces] == ["april", "zcode"], surfaces
+    assert all("always_on" in s for s in surfaces)
+    # headless render on a temp deployed persona
+    vtmp = Path(tempfile.mkdtemp(prefix="april-p76-views-"))
+    vo_ade = vtmp / ".ade"
+    old_ade = os.environ.get("APRIL_ADE_ROOT")
+    os.environ["APRIL_ADE_ROOT"] = str(vo_ade)
+    try:
+        ade_deploy(
+            Path.cwd() / "core" / "harness" / "basetree" / "april",
+            surface=APRIL_SURFACE,
+            persona="april",
+            domain="default",
+            task_id="demo/views-0001",
+        )
+        pv = ade_persona_view("april", domain="default", library_root=vo_ade / "library", root=vo_ade)
+        rendered = ade_views.render_persona_summary(pv)
+        assert "persona: april" in rendered
+        assert "user_context_facts: 0 (count only)" in rendered
+        assert "fact one" not in rendered and "fact two" not in rendered, rendered
+        lib_rendered = ade_views.render_library_view(pv["library"])
+        assert isinstance(lib_rendered, str) and "fact one" not in lib_rendered
+        assert ade_views.render_persona_summary(None) == "(no persona booted)"
+        assert ade_views.render_library_view(None) == "(library empty)"
+    finally:
+        if old_ade is None:
+            os.environ.pop("APRIL_ADE_ROOT", None)
+        else:
+            os.environ["APRIL_ADE_ROOT"] = old_ade
+        shutil.rmtree(vtmp, ignore_errors=True)
+    checks.append(
+        "P7-6 view contracts: surfaces catalog + persona/library headless render "
+        "helpers run without a terminal; personal facts stay counts (never text)"
+    )
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")
