@@ -539,10 +539,30 @@ dedupe, facet-twin 4-line render, ocean/degraded silence, loud cap refusal);
 directive lines through `resolve_prompts`, ocean grain → none). Self-checks:
 25 ok lines, offline.
 
+### P7-2 — TS mirror of facet aggregation + directives (landed 2026-11-04)
+
+`core/harness/personality.ts` is no longer the verbatim pre-P6 archive. It now
+also ships `FACET_MAP`, `aggregateFacets` (the same half-up `_round`), the
+`FACET_CONDITIONS` table and `facetDirectives` (registry order, mid silence,
+dedupe, table-gap raises), the facet fields on `PersonaConfig`, a
+`validate()` carve for facet names/values, the registry-ordered `## Facets`
+data block and the `## Facet directives` section in `buildSystemPrompt`, plus
+the `FACET_RIDEALONG` full-coverage twin fixture. `_ts_reference_check`
+extends the bun cross-check (already the ocean pin): it parses two new
+`--- Facet prompt ---` / `--- Facet derived ---` markers from the archive's
+demo guard and asserts byte-equality of both the compiled text and the nine
+derived params against Python's `compile_persona(FacetTwin)` / `derive(FacetTwin)`.
+Spec: ocean-profile-schema.md updates the two P7-1 ponytail comments ("archive
+remains pre-P6 verbatim" in Aggregation; "TS mirror is P7-2" in Compiled
+shape) to record the mirror landing. The `prompts.VERSION` kernel constant
+moves `harness2-1` -> `harness2-2` (mirrored in the upstream harness2 copy).
+Self-check stays 25 `ok:` lines: P7-2 extends the existing bun cross-check on
+the demo line, it does not add a new named pin. `git -C ZCode status
+--porcelain` empty.
+
 ---
 
 ## Superseded documents (removed 2026-10-31, preserved in git history)
-
 - Root: `IMPLEMENTATION.md`
 - ADE drafts: `docs/ADE-ARCHITECTURE.md`, `docs/ADE-IMPLEMENTATION-GUIDE.md`,
   `docs/ADE-MCP-ARCHITECTURE.md`, `docs/ADE-ROADMAP.md`, `docs/ADE-ZCODE-FEATURES.md`

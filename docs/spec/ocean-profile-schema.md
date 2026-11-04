@@ -193,9 +193,13 @@ Standard NEO-PI-R names, grouped by domain (`FACET_MAP` in
 ### Aggregation (facet grain → domain grain)
 
 Facet values aggregate to domain scores **before** the untouched kernel,
-`personality.ts`, stays the verbatim reference; the bun cross-check keeps pinning
-ocean-grain profiles only. # ponytail: the TS archive remains the pre-P6
-verbatim text — aggregation is a loader-layer rule here.
+`personality.ts`: landed in P7-2 — the archive now mirrors `FACET_MAP`,
+`aggregateFacets` (half-up `_round`), `FACET_CONDITIONS` and `facetDirectives`, and
+the facet-rendering branch of `buildSystemPrompt`, so the bun cross-check pins
+ocean grain AND facet grain byte-equal to the Python port
+(`core/harness/personality.py`). Aggregation itself stays a loader-layer rule
+here (it is client-side serialization data), but the implementation is no longer
+deferred.
 
 - A domain's score is the rounded mean of its **present** facets — `_round`, the
   same JS `Math.round` half-up rule the derived parameters use. A domain that sits
@@ -241,8 +245,9 @@ enforced in `validate()` — the table is trimmed, never the render truncated), 
 the shipped table's worst case (all 30 facets outside `mid`) renders well under it,
 so the "full coverage compiles" contract above cannot break on table growth without
 a loud refusal. # ponytail: the cap is a self-judged boundary against this section
-becoming a second system prompt; the TS mirror of the table is P7-2, so the bun
-cross-check keeps pinning ocean-grain profiles only.
+becoming a second system prompt. The TS mirror of the table landed in P7-2, so the
+bun cross-check now also pins the compiled facet sections byte-equal
+(`FACET_CONDITIONS` ported, renamed test path: `personality.demo()` facet arm).
 
 ### Degradation (partial facet coverage)
 

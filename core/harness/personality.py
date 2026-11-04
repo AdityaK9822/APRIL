@@ -1075,40 +1075,84 @@ def _ts_reference_check(profiles: dict[str, Profile]) -> str:
         if proc.returncode != 0:
             return f"TS cross-check skipped (bun run failed: {proc.stderr[:120]})"
         out = proc.stdout
-        marker = "\n--- Derived parameters ---"
-        assert marker in out, "TS demo output shape changed"
-        ts_prompt, derived_block = out.split(marker, 1)
+        ocean_marker = "\n--- Derived parameters ---"
+        facet_prompt_marker = "\n--- Facet prompt ---"
+        facet_derived_marker = "\n--- Facet derived ---"
+        assert ocean_marker in out, "TS demo output shape changed"
+        assert facet_prompt_marker in out, "TS facet prompt marker missing"
+        assert facet_derived_marker in out, "TS facet derived marker missing"
 
-        compiled = compile_persona(profiles["april"])
-        ts_prompt = ts_prompt.rstrip("\n")
-        assert ts_prompt == compiled, (
+        # Ocean grain — untouched pin (must byte-equal the APRIL preset).
+        april_part, rest_ocean = out.split(ocean_marker, 1)
+        ts_ocean_prompt = april_part.rstrip("\n")
+        ocean_derived_block = rest_ocean.split(facet_prompt_marker, 1)[0]
+        compiled_ocean = compile_persona(profiles["april"])
+        assert ts_ocean_prompt == compiled_ocean, (
             "TS buildSystemPrompt(APRIL) != compile_persona(april): "
-            + "; ".join(_diff_lines(compiled.splitlines(), ts_prompt.splitlines())[:5])
+            + "; ".join(_diff_lines(compiled_ocean.splitlines(), ts_ocean_prompt.splitlines())[:5])
         )
-
-        d = derive(profiles["april"])
-        got: dict = {}
-        for m in re.finditer(r'^  (\w+): ("[^"]*"|-?\d+(?:\.\d+)?)', derived_block, re.M):
+        d_ocean = derive(profiles["april"])
+        got_ocean: dict = {}
+        for m in re.finditer(r'^  (\w+): ("[^"]*"|-?\d+(?:\.\d+)?)', ocean_derived_block, re.M):
             key, raw = m.group(1), m.group(2)
             if raw.startswith('"'):
-                got[key] = raw[1:-1]
+                got_ocean[key] = raw[1:-1]
             elif "." in raw:
-                got[key] = float(raw)
+                got_ocean[key] = float(raw)
             else:
-                got[key] = int(raw)
-        want = {
-            "warmth": d.warmth,
-            "proactivity": d.proactivity,
-            "caution": d.caution,
-            "structure": d.structure,
-            "candor": d.candor,
-            "formality": d.formality,
-            "humor": d.humor,
-            "length": d.length,
-            "temperature": d.temperature,
+                got_ocean[key] = int(raw)
+        want_ocean = {
+            "warmth": d_ocean.warmth,
+            "proactivity": d_ocean.proactivity,
+            "caution": d_ocean.caution,
+            "structure": d_ocean.structure,
+            "candor": d_ocean.candor,
+            "formality": d_ocean.formality,
+            "humor": d_ocean.humor,
+            "length": d_ocean.length,
+            "temperature": d_ocean.temperature,
         }
-        assert got == want, (got, want)
-        return "TS cross-check (bun run): compiled preset + derived params identical"
+        assert got_ocean == want_ocean, (got_ocean, want_ocean)
+
+        # Facet grain — P7-2 mirror. Same full-coverage twin as the P7-1 pins.
+        rest_fp = out.split(facet_prompt_marker, 1)[1]
+        ts_facet_prompt = rest_fp.split(facet_derived_marker, 1)[0].strip("\n")
+        facet_derived_block = rest_fp.split(facet_derived_marker, 1)[1].strip("\n")
+
+        facet_pairs = (
+            ("fantasy", 59), ("aesthetics", 60), ("order", 54), ("competence", 55),
+            ("warmth", 49), ("gregariousness", 50), ("trust", 84),
+            ("straightforwardness", 85), ("anxiety", 14), ("angry_hostility", 15),
+        )
+        ftwin = persona_from_dict({"name": "FacetTwin", "facets": dict(facet_pairs)})
+        compiled_facet = compile_persona(ftwin)
+        assert ts_facet_prompt == compiled_facet, (
+            "TS buildSystemPrompt(FACET_RIDEALONG) != compile_persona(FacetTwin): "
+            + "; ".join(_diff_lines(compiled_facet.splitlines(), ts_facet_prompt.splitlines())[:5])
+        )
+        d_facet = derive(ftwin)
+        got_facet: dict = {}
+        for m in re.finditer(r'^  (\w+): ("[^"]*"|-?\d+(?:\.\d+)?)', facet_derived_block, re.M):
+            key, raw = m.group(1), m.group(2)
+            if raw.startswith('"'):
+                got_facet[key] = raw[1:-1]
+            elif "." in raw:
+                got_facet[key] = float(raw)
+            else:
+                got_facet[key] = int(raw)
+        want_facet = {
+            "warmth": d_facet.warmth,
+            "proactivity": d_facet.proactivity,
+            "caution": d_facet.caution,
+            "structure": d_facet.structure,
+            "candor": d_facet.candor,
+            "formality": d_facet.formality,
+            "humor": d_facet.humor,
+            "length": d_facet.length,
+            "temperature": d_facet.temperature,
+        }
+        assert got_facet == want_facet, (got_facet, want_facet)
+        return "TS cross-check (bun run): ocean + facet compiled prompts + derived params identical"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

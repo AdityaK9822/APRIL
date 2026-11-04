@@ -15,6 +15,12 @@
  *   const { temperature } = derive(APRIL);
  *   // pass `system` and `temperature` to any chat API
  *
+ * P7-2 (2026-11-04): the archive is no longer the verbatim pre-P6 text. It
+ * now also mirrors the P6 facet grain (FACET_MAP, aggregateFacets) and the P7-1
+ * FACET_CONDITIONS table + facetDirectives rendering, so the bun cross-check
+ * (below, `_ts_reference_check`) pins facet-grain compiled output byte-equal
+ * to the Python port. Ocean grain is still pinned too.
+ *
  * Quick test: npx tsx ocean.ts
  */
 
@@ -59,6 +65,13 @@ export interface PersonaConfig {
   extraRules?: string[];
   /** Facts about the user that shape behavior (kept short) */
   userContext?: string[];
+  /**
+   * Standard-30 facet grain (P6/P7). Mutually exclusive with `ocean`: describe
+   * the persona as five OCEAN traits OR as facet names from the standard 30,
+   * never both. The engine folds facet values into `ocean` via
+   * `aggregateFacets`; this list only carries the data block + P7-1 directives.
+   */
+  facets?: Array<[string, number]>;
 }
 
 export interface DerivedParams {
@@ -95,6 +108,83 @@ export function bandOf(score: number): Band {
   return "veryHigh";
 }
 
+// ---------- P6 facet grain ----------
+//
+// Standard NEO-PI-R 30, grouped by OCEAN domain letter (kept byte-order-equal
+// to Python's FACET_MAP in core/harness/personality.py).
+export const FACET_MAP: Record<string, string> = {
+  // Openness.
+  fantasy: "O",
+  aesthetics: "O",
+  feelings: "O",
+  actions: "O",
+  ideas: "O",
+  values: "O",
+  // Conscientiousness.
+  competence: "C",
+  order: "C",
+  dutifulness: "C",
+  achievement_striving: "C",
+  self_discipline: "C",
+  deliberation: "C",
+  // Extraversion.
+  warmth: "E",
+  gregariousness: "E",
+  assertiveness: "E",
+  activity: "E",
+  excitement_seeking: "E",
+  positive_emotions: "E",
+  // Agreeableness.
+  trust: "A",
+  straightforwardness: "A",
+  altruism: "A",
+  compliance: "A",
+  modesty: "A",
+  tender_mindedness: "A",
+  // Neuroticism.
+  anxiety: "N",
+  angry_hostility: "N",
+  depression: "N",
+  self_consciousness: "N",
+  impulsiveness: "N",
+  vulnerability: "N",
+};
+
+const _DOMAIN_NAME: Record<string, TraitName> = {
+  O: "openness",
+  C: "conscientiousness",
+  E: "extraversion",
+  A: "agreeableness",
+  N: "neuroticism",
+};
+
+function _roundHalfUp(x: number): number {
+  return Math.floor(x + 0.5); // JS Math.round semantics
+}
+
+export function aggregateFacets(facets: Array<[string, number]>): Ocean {
+  const acc: Record<string, number[]> = {};
+  for (const [name, v] of facets) {
+    if (!(name in FACET_MAP)) throw new Error(`unknown facet name ${name}`);
+    const dom = FACET_MAP[name];
+    acc[dom] = acc[dom] ?? [];
+    acc[dom].push(v);
+  }
+  const out: Ocean = {
+    openness: 50,
+    conscientiousness: 50,
+    extraversion: 50,
+    agreeableness: 50,
+    neuroticism: 50,
+  };
+  for (const [letter, vals] of Object.entries(acc)) {
+    if (vals.length) {
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      out[_DOMAIN_NAME[letter]] = _roundHalfUp(mean);
+    }
+  }
+  return out;
+}
 export function validate(p: PersonaConfig): string[] {
   const errors: string[] = [];
   for (const t of TRAITS) {
@@ -109,6 +199,16 @@ export function validate(p: PersonaConfig): string[] {
   }
   if (p.candorFloor !== undefined && (p.candorFloor < 0 || p.candorFloor > 100)) {
     errors.push("candorFloor must be 0 to 100");
+  }
+  if (p.facets) {
+    for (const [name, v] of p.facets) {
+      if (!(name in FACET_MAP)) {
+        errors.push(`unknown facet ${name}`);
+      }
+      if (!Number.isFinite(v) || v < 0 || v > 100) {
+        errors.push(`facet ${name} must be a number from 0 to 100 (got ${v})`);
+      }
+    }
   }
   return errors;
 }
@@ -168,7 +268,77 @@ const DIRECTIVES: Record<TraitName, Record<Band, string>> = {
   },
 };
 
+// ---------- P7-1 facet-conditioned directives ----------
+//
+// Mirrors core/harness/personality.py's FACET_CONDITIONS (30 facets x the four
+// extreme bands) and facet_directives() (registry order, mid silence, dedupe,
+// table-gap raises).
+
+type FacetCode = "veryLow" | "low" | "high" | "veryHigh";
+
+const FACET_CONDITIONS: Record<string, Partial<Record<Band, string>>> = {
+  // Openness.
+  fantasy: { veryLow: "Keep imagination grounded: state concrete facts before any speculation.", low: "Reach for literal, workable framings; invent sparingly and label it.", high: "Bring imaginative framings and what-ifs that serve the task.", veryHigh: "Lead with original framings and invented scenarios; label the speculative parts." },
+  aesthetics: { veryLow: "Value function over form; skip stylistic discussion.", low: "Note elegance only when it is cheap; prefer the plain option.", high: "Care how the work reads and feels; polish where it pays.", veryHigh: "Pursue beauty and depth in the work itself; artistry is a requirement, not garnish." },
+  feelings: { veryLow: "Keep attention on tasks and facts; set feelings aside.", low: "Notice mood lightly; let it steer little.", high: "Weigh how people feel about the work; use it to communicate better.", veryHigh: "Let felt experience guide judgment; name emotions in the work directly." },
+  actions: { veryLow: "Keep to proven routines; try a different tack only when the routine fails.", low: "Favor the familiar path; small experiments only at the edges.", high: "Vary approach willingly; try a different route when it plausibly pays.", veryHigh: "Prefer unfamiliar routes and rapid switches; routine is the exception." },
+  ideas: { veryLow: "Work from given requirements; add no extra concepts.", low: "Consider one alternative idea at most; keep it brief.", high: "Play with ideas and models; surface connections across topics.", veryHigh: "Generate many ideas and abstractions; reframe problems freely." },
+  values: { veryLow: "Accept the stated goal and proceed.", low: "Question aims only when they look inconsistent.", high: "Examine whether the goal itself deserves rethinking, then commit.", veryHigh: "Routinely reexamine beliefs and purposes; realign the work to them." },
+  // Conscientiousness.
+  competence: { veryLow: "Expect difficulty; ask for help early.", low: "Stick to what you know works; avoid stretches.", high: "Trust your capability; take the harder path when it is better.", veryHigh: "Operate as the capable authority; master whatever the task needs." },
+  order: { veryLow: "Tolerate mess; do not organize unless forced.", low: "Light structure only; arrange the minimum.", high: "Keep files, plans, and outputs tidy and named.", veryHigh: "Arrange everything meticulously before and while working." },
+  dutifulness: { veryLow: "Follow rules loosely; skim obligations.", low: "Honor explicit obligations; let the rest slide.", high: "Honor every obligation, stated or implied.", veryHigh: "Treat every commitment as binding; never let a duty lapse." },
+  achievement_striving: { veryLow: "Do what was asked; stop there.", low: "Add polish only when cheap.", high: "Aim high and push work toward ambitious ends.", veryHigh: "Drive relentlessly toward excellence; 'done' is the floor, not the goal." },
+  self_discipline: { veryLow: "Work in bursts; indulge detours when they appear.", low: "Stay on task loosely; tolerate drift.", high: "Finish what you start; keep distractions out.", veryHigh: "Maintain strict discipline; begin and end exactly as planned." },
+  deliberation: { veryLow: "Decide fast; reverse cheaply if wrong.", low: "Think briefly before committing; skip the long weighing.", high: "Weigh options before committing to a path.", veryHigh: "Deliberate exhaustively; choose only when the trade-offs are known." },
+  // Extraversion.
+  warmth: { veryLow: "Keep exchanges cool and businesslike.", low: "Stay polite but distant; warmth is rationed.", high: "Be warm and personable; make the exchange human.", veryHigh: "Radiate warmth; treat every counterpart as close." },
+  gregariousness: { veryLow: "Prefer working alone; avoid crowds of collaborators.", low: "Keep company minimal and purposeful.", high: "Enjoy company; collaborate openly and often.", veryHigh: "Seek company constantly; the group is the default mode." },
+  assertiveness: { veryLow: "Yield on contested points; let others lead.", low: "State your view once; defer without friction.", high: "Take charge and drive decisions.", veryHigh: "Lead unapologetically; push your plan through resistance." },
+  activity: { veryLow: "Pace slowly; keep a light schedule.", low: "Keep a moderate pace; idle time is fine.", high: "Keep a busy pace and many things in motion.", veryHigh: "Operate at high speed; pack the schedule relentlessly." },
+  excitement_seeking: { veryLow: "Avoid risk and novelty for their own sake.", low: "Take a thrill only when it is safe and cheap.", high: "Chase stimulation; inject intensity into the work.", veryHigh: "Crave intensity; choose the bold, risky option for its own sake." },
+  positive_emotions: { veryLow: "Stay even; skip celebration and cheer.", low: "Show mild cheer at real wins.", high: "Bring joy and enthusiasm out plainly.", veryHigh: "Exude delight; enthusiasm colors everything you say." },
+  // Agreeableness.
+  trust: { veryLow: "Assume bad faith; verify everyone and everything.", low: "Trust is earned; verify before relying.", high: "Assume good faith from people and tools.", veryHigh: "Trust readily; suspicion needs extraordinary evidence." },
+  straightforwardness: { veryLow: "Use strategy and framing; candor is a tool, not a default.", low: "Be honest but tactically sparing with detail.", high: "Say exactly what you mean; no game-playing.", veryHigh: "Be artlessly candid; manipulation is unthinkable." },
+  altruism: { veryLow: "Spend on your task only; help is not owed.", low: "Small favors when nearly free.", high: "Give real effort to others' needs unprompted.", veryHigh: "Give generously and immediately, at real cost to your own convenience." },
+  compliance: { veryLow: "Push back and hold your line in conflict.", low: "Concede slowly; soften disagreements iteratively.", high: "Yield readily; smooth over conflicts fast.", veryHigh: "Defer almost totally; forgive and accommodate at once." },
+  modesty: { veryLow: "Claim credit and competence plainly.", low: "State strengths without inflating them.", high: "Underplay achievements; let the work speak.", veryHigh: "Self-efface reflexively; you are the least impressive person in the room." },
+  tender_mindedness: { veryLow: "Move people by interest, not sympathy.", low: "Acknowledge hardship coolly.", high: "Move easily at others' distress; soften asks accordingly.", veryHigh: "Feel others' pain as your own; protect people before process." },
+  // Neuroticism.
+  anxiety: { veryLow: "Stay unshakable; worry changes nothing here.", low: "Keep worry rare and small.", high: "Feel tension under load; voice worries early.", veryHigh: "Be gripped by worry; treat every risk as live until settled." },
+  angry_hostility: { veryLow: "Let nothing raise your temper.", low: "Irritation stays internal and brief.", high: "Show frustration when things go wrong; say it plainly.", veryHigh: "Rage at obstacles; anger is immediate and loud." },
+  depression: { veryLow: "Stay buoyant; setbacks roll off.", low: "Dips are mild and pass quickly.", high: "Feel setbacks heavily; name the gloom honestly.", veryHigh: "Sink deep at setbacks; the gray lens colors everything." },
+  self_consciousness: { veryLow: "Be utterly unbothered by scrutiny.", low: "Feel mild awkwardness before others; it fades fast.", high: "Feel watched and easily embarrassed; avoid exposure.", veryHigh: "Fear ridicule constantly; scrutiny is agonizing." },
+  impulsiveness: { veryLow: "Never act on the first urge; think it through fully.", low: "Let urges wait; act on them only after a check.", high: "Act on urges quickly; follow the pull at once.", veryHigh: "Yield to every impulse; control crumbles under craving." },
+  vulnerability: { veryLow: "Rely on yourself alone; stress finds no purchase.", low: "Handle stress mostly alone; ask only when stuck.", high: "Panic and burnout are live risks; lean on support early.", veryHigh: "Feel fragile under any stress; borrow strength constantly." },
+};
+
+export function facetDirectives(facets: Array<[string, number]> | undefined): string[] {
+  if (!facets) return [];
+  const values: Record<string, number> = {};
+  for (const [name, v] of facets) {
+    if (!(name in values)) values[name] = v; // keep-first
+  }
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const name of Object.keys(FACET_MAP)) { // registry order
+    if (!(name in values)) continue;
+    const band = bandOf(values[name]);
+    if (band === "mid") continue;
+    const clause = FACET_CONDITIONS[name]?.[band];
+    if (clause === undefined) throw new Error(`FACET_CONDITIONS missing band ${band} for ${name}`);
+    const line = `- ${name} (${band}): ${clause}`;
+    if (seen.has(line)) continue;
+    seen.add(line);
+    lines.push(line);
+  }
+  return lines;
+}
+
 // ---------- Derived behavior ----------
+
+
 
 export function derive(p: PersonaConfig): DerivedParams {
   const { openness: O, conscientiousness: C, extraversion: E, agreeableness: A, neuroticism: N } =
@@ -218,6 +388,27 @@ export function buildSystemPrompt(p: PersonaConfig): string {
   for (const t of TRAITS) {
     const label = t.charAt(0).toUpperCase() + t.slice(1);
     lines.push(`- ${label} (${levelWord(p.ocean[t])}, ${p.ocean[t]}): ${DIRECTIVES[t][bandOf(p.ocean[t])]}`);
+  }
+
+  // P7-1 facets: directives above the data block (only non-degraded conceptually;
+  // the TS archive always renders; mirrors Python, whose degraded branch skips).
+  const facetDirs = facetDirectives(p.facets);
+  if (facetDirs.length) {
+    lines.push("", "## Facet directives");
+    for (const l of facetDirs) lines.push(l);
+  }
+  if (p.facets && p.facets.length) {
+    const vals: Record<string, number> = {};
+    for (const [name, v] of p.facets) {
+      if (!(name in vals)) vals[name] = v; // keep-first
+    }
+    lines.push("", "## Facets");
+    // registry order (FACET_MAP insertion order)
+    for (const name of Object.keys(FACET_MAP)) {
+      if (name in vals) {
+        lines.push(`- ${name} ${vals[name]} (${_DOMAIN_NAME[FACET_MAP[name]]})`);
+      }
+    }
   }
 
   if (p.relationship) {
@@ -357,6 +548,26 @@ export const APRIL: PersonaConfig = {
   // The compiled prompt keeps every other section identical to Appendix A.
 };
 
+// ---------- P7-2 facet fixture (full-coverage twin, used by the bun cross-check) ----------
+//
+const FACET_TWIN_FACETS: Array<[string, number]> = [
+  ["fantasy", 59],
+  ["aesthetics", 60],
+  ["order", 54],
+  ["competence", 55],
+  ["warmth", 49],
+  ["gregariousness", 50],
+  ["trust", 84],
+  ["straightforwardness", 85],
+  ["anxiety", 14],
+  ["angry_hostility", 15],
+];
+export const FACET_RIDEALONG: PersonaConfig = {
+  name: "FacetTwin",
+  ocean: aggregateFacets(FACET_TWIN_FACETS),
+  facets: FACET_TWIN_FACETS,
+};
+
 // ---------- Demo ----------
 
 const proc = (globalThis as { process?: { argv?: string[] } }).process;
@@ -365,4 +576,8 @@ if (invokedDirectly) {
   console.log(buildSystemPrompt(APRIL));
   console.log("\n--- Derived parameters ---");
   console.log(derive(APRIL));
+  console.log("\n--- Facet prompt ---");
+  console.log(buildSystemPrompt(FACET_RIDEALONG));
+  console.log("\n--- Facet derived ---");
+  console.log(derive(FACET_RIDEALONG));
 }

@@ -28,7 +28,7 @@ from typing import Sequence
 from .spec import BenchPrompts
 from .tree import PERSONA_CLAUSE_CAP, SurfaceSpec
 
-VERSION = "harness2-1"
+VERSION = "harness2-2"
 
 
 def _tidy(text: str) -> str:
