@@ -857,6 +857,7 @@ def run_sweep(
     max_tasks: int | None = None,
     only_tasks: Sequence[str] = (),
     profiles: Sequence[str] = (),
+    seeds: Sequence[int] | None = None,
 ) -> dict:
     """Run domains concurrently, preserving task order after stream filters are applied.
 
@@ -864,6 +865,13 @@ def run_sweep(
     profile gets its own adapter spec, its own namespace segment (`-P<id>`) and
     its own library root, so personas never share lessons by accident. An empty
     `profiles` keeps the single-run behaviour unchanged.
+
+    `seeds` makes seeds a driver parameter rather than a caller loop (P7-4):
+    when given, this function runs the single-seed sweep path once per entry
+    and returns one aggregate (with `results_by_seed` and `per_seed` carrying
+    each seed's full report) over a shared `library_root`. When omitted/empty
+    the single-seed path is taken byte-for-byte. Namespaces already carry
+    `-s<seed>`, so the per-seed runs land in separate directories.
     """
     if profiles:
         sections: dict[str, dict] = {}
@@ -885,6 +893,7 @@ def run_sweep(
                 max_tasks=max_tasks,
                 only_tasks=only_tasks,
                 profiles=(),
+                seeds=seeds,
             )
         return {
             "benchmark": adapter.spec.name,
@@ -896,6 +905,7 @@ def run_sweep(
             "profiles": [str(p) for p in profiles],
             "n_dims": 3,
             "library_root": str(library_root),
+            "seeds": [int(s) for s in (seeds or [])],
             "started_at": min(
                 (s.get("started_at", "") for s in sections.values()), default=""
             ),
@@ -904,6 +914,54 @@ def run_sweep(
             ),
             "results": sections,
         }
+
+    seed_list = [int(s) for s in (seeds or [])]
+    if seed_list:
+        started = datetime.now(timezone.utc).isoformat()
+        per_seed: dict[str, dict] = {}
+        n_dims = None
+        for s in seed_list:
+            r = run_sweep(
+                k,
+                adapter=adapter,
+                prop=prop,
+                runs_root=runs_root,
+                library_root=library_root,
+                split=split,
+                modes=modes,
+                seed=s,
+                tag=tag,
+                domain_parallel=domain_parallel,
+                only_domains=only_domains,
+                selector_prop=selector_prop,
+                pool_policy=pool_policy,
+                max_tasks=max_tasks,
+                only_tasks=only_tasks,
+                profiles=(),
+                seeds=None,
+            )
+            per_seed[str(s)] = r
+            if n_dims is None:
+                n_dims = r.get("n_dims", 3)
+        finished = datetime.now(timezone.utc).isoformat()
+        aggregate = {
+            "benchmark": adapter.spec.name,
+            "substrate": adapter.substrate.name,
+            "k": k,
+            "modes": list(modes),
+            "seed": None,
+            "seeds": seed_list,
+            "tag": tag,
+            "profiles": [],
+            "n_dims": n_dims if n_dims is not None else 3,
+            "library_root": str(library_root),
+            "domain_order": next((r.get("domain_order") for r in per_seed.values() if r.get("domain_order")), []),
+            "started_at": min((r.get("started_at", "") for r in per_seed.values()), default=started),
+            "finished_at": max((r.get("finished_at", "") for r in per_seed.values()), default=finished),
+            "per_seed": per_seed,
+            "results_by_seed": per_seed,
+        }
+        return aggregate
 
     ordered_tasks = task_stream(
         adapter,
@@ -978,6 +1036,7 @@ def run_sweep_zcode(
     prop: Proposer | None = None,
     selector_prop: Proposer | None = None,
     profiles: Sequence[str] = (),
+    seeds: Sequence[int] | None = None,
 ) -> dict:
     """The first full sweep on the zcode substrate (P1-1.6): the zcode adapter, the
     proposer on `claude_cli`, everything else `run_sweep` semantics.
@@ -1013,4 +1072,5 @@ def run_sweep_zcode(
         pool_policy=pool_policy,
         selector_prop=selector_prop if selector_prop is not None else prop,
         profiles=profiles,
+        seeds=seeds,
     )

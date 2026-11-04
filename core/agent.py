@@ -1827,6 +1827,92 @@ if __name__ == '__main__':
         "empty input; runs on fixtures only (inert)"
     )
 
+    # 23. P7-4: seeds are a driver parameter, not a caller loop. Multi-seed
+    # sweep runs once per seed and aggregates per-seed ledger rows under one
+    # library_root; each namespace carries -s<seed>; the seedless path is
+    # byte-identical because `seeds=None` (the default) takes the old branch.
+    from core.harness.execution_manager import _DryProposer
+
+    old_zbin = os.environ.get("APRIL_ZCODE_BIN")
+    old_zroot = os.environ.get("APRIL_RUNS_ROOT")
+    mtmp = Path(tempfile.mkdtemp(prefix="april-p74-seeds-"))
+    os.environ.update(
+        {"APRIL_ZCODE_BIN": str(zstub), "APRIL_RUNS_ROOT": str(mtmp / "runs")}
+    )
+    try:
+        seed_a, seed_b = 3, 7
+        msweep = harness_schedule.run_sweep_zcode(
+            1,
+            runs_root=mtmp / "runs",
+            library_root=mtmp / "library",
+            modes=("agg",),
+            only_tasks=(t0,),
+            max_tasks=1,
+            prop=_DryProposer(),
+            seeds=(seed_a, seed_b),
+        )
+    finally:
+        if old_zbin is None:
+            os.environ.pop("APRIL_ZCODE_BIN", None)
+        else:
+            os.environ["APRIL_ZCODE_BIN"] = old_zbin
+        if old_zroot is None:
+            os.environ.pop("APRIL_RUNS_ROOT", None)
+        else:
+            os.environ["APRIL_RUNS_ROOT"] = old_zroot
+    try:
+        assert msweep["seeds"] == [seed_a, seed_b], msweep["seeds"]
+        assert set(msweep["results_by_seed"]) == {str(seed_a), str(seed_b)}, msweep["results_by_seed"].keys()
+        for s in (seed_a, seed_b):
+            ns_dir = harness_schedule.ns("zcode", "zcode", "agg", 1, seed=s)
+            task_dir = mtmp / "runs" / ns_dir / t0.replace("/", "__")
+            summary = json.loads((task_dir / "summary.json").read_text())
+            led = summary["modes"]["agg"]["ledger"]
+            # ledger exactness per seed (R=4k/P=3k at 2 dims, k=1).
+            assert (led["n_dims"], led["R"], led["P"]) == (2, 4, 3), led
+            assert led["R"] == led["expected_R"] and led["P"] == led["expected_P"], led
+            assert summary.get("seed") == s, (summary.get("seed"), s)
+            row = msweep["results_by_seed"][str(s)]["domains"][0]["tasks"][0]
+            assert row["status"] == "ok", row
+    finally:
+        shutil.rmtree(mtmp, ignore_errors=True)
+    # No-seed path is byte-identical: calling with seeds=None takes the old branch.
+    ns_tmp = Path(tempfile.mkdtemp(prefix="april-p74-none-"))
+    old_zbin = os.environ.get("APRIL_ZCODE_BIN")
+    old_zroot = os.environ.get("APRIL_RUNS_ROOT")
+    os.environ.update(
+        {"APRIL_ZCODE_BIN": str(zstub), "APRIL_RUNS_ROOT": str(ns_tmp / "runs")}
+    )
+    try:
+        ns_sweep = harness_schedule.run_sweep_zcode(
+            1,
+            runs_root=ns_tmp / "runs",
+            library_root=ns_tmp / "library",
+            modes=("agg",),
+            only_tasks=(t0,),
+            max_tasks=1,
+            prop=_DryProposer(),
+        )
+    finally:
+        if old_zbin is None:
+            os.environ.pop("APRIL_ZCODE_BIN", None)
+        else:
+            os.environ["APRIL_ZCODE_BIN"] = old_zbin
+        if old_zroot is None:
+            os.environ.pop("APRIL_RUNS_ROOT", None)
+        else:
+            os.environ["APRIL_RUNS_ROOT"] = old_zroot
+    try:
+        assert "seeds" not in ns_sweep or ns_sweep.get("seeds") in (None, []), ns_sweep.get("seeds")
+        assert "results_by_seed" not in ns_sweep, ns_sweep.keys()
+    finally:
+        shutil.rmtree(ns_tmp, ignore_errors=True)
+    checks.append(
+        "P7-4 seeds: multi-seed runs two distinct ns dirs with exact R=4k/P=3k "
+        "ledgers per seed; aggregate carries both; seeds=None (default) takes "
+        "the seedless branch (byte-identical contract held)"
+    )
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")
