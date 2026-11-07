@@ -300,6 +300,15 @@ A facet-grain profile swaps `ocean` for `facets` (§7): same file weight, same l
 zero code — its per-facet directives compile from the harness-owned table, so nothing
 is authored per profile. The scale-out contract holds at both grains.
 
+`profiles/facetfull.json` is the canonical committed example: all 30 standard
+facets, six per domain, whose half-up domain means are exactly
+`O 60 / C 55 / E 50 / A 85 / N 15` — the same vector as `ridealong`. It is the
+facet-grain proof that the shape is data: a 1-task `-Pfacetfull` sweep runs the
+ordinary driver with the PSY lane on, the OCEAN section and derived parameters
+are identical to the ocean-grain twin's, and no harness source file names the id.
+Full coverage (at least one facet per domain, §7) is what makes a facet profile
+compile; partial coverage still loads but degrades by design.
+
 ## 9. Reference profiles
 
 | id | O C E A N | Notes |
@@ -308,6 +317,7 @@ is authored per profile. The scale-out contract holds at both grains.
 | `user` | 85 64 55 88 44 | Ocean-only (the pattern that proves defaults work) |
 | `verifier` | 35 95 45 55 60 | High structure/caution, high candor floor |
 | `ridealong` | 60 55 50 85 15 | P4 scale-out proof: low N, high A, mid E; one file, zero code |
+| `facetfull` | 60 55 50 85 15 | P7-7 canonical facet-grain profile: all 30 facets, 6 per domain, hand-computed half-up means land on `ridealong`; one file, zero code |
 
 Deferred and deliberately absent: a nearest-profile backfill for legacy library
 lessons — IMPLEMENTED but UNRUN (`core/harness/backfill.py`: `nearest_profile`,

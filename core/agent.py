@@ -2018,6 +2018,118 @@ if __name__ == '__main__':
         "helpers run without a terminal; personal facts stay counts (never text)"
     )
 
+    # 26. P7-7: the committed facet-grain profile. The shape is data: one JSON
+    # file, full 30-facet coverage, aggregates to the same OCEAN vector as the
+    # ocean-grain twin before the untouched kernel sees it. The hand-computed
+    # per-domain half-up means are the pin, not the loader's own arithmetic.
+    from core.harness import personality as p7_personality
+    facet_path = Path.cwd() / "profiles" / "facetfull.json"
+    facet_raw = json.loads(facet_path.read_text(encoding="utf-8"))
+    assert "ocean" not in facet_raw, "facet profile must not carry a second grain"
+    facet_data = facet_raw["facets"]
+    assert len(facet_data) == 30, len(facet_data)
+    by_domain: dict[str, list[int]] = {}
+    for fname, fval in facet_data.items():
+        by_domain.setdefault(p7_personality.FACET_MAP[fname], []).append(fval)
+    assert {d: len(v) for d, v in by_domain.items()} == {
+        "O": 6, "C": 6, "E": 6, "A": 6, "N": 6
+    }, by_domain
+    # Half-up domain mean, computed here rather than delegated to aggregate_facets.
+    hand = {
+        d: (2 * sum(vals) + len(vals)) // (2 * len(vals))
+        for d, vals in by_domain.items()
+    }
+    facet_prof = p7_personality.load_profile("facetfull")
+    assert p7_personality.out_of_band(facet_prof) == "", "full coverage must compile"
+    assert {
+        "O": facet_prof.persona.ocean.openness,
+        "C": facet_prof.persona.ocean.conscientiousness,
+        "E": facet_prof.persona.ocean.extraversion,
+        "A": facet_prof.persona.ocean.agreeableness,
+        "N": facet_prof.persona.ocean.neuroticism,
+    } == hand, (facet_prof.persona.ocean, hand)
+    facet_dirs = p7_personality.facet_directives(facet_prof.persona.facets)
+    assert sum(len(line) + 1 for line in facet_dirs) <= p7_personality.FACET_DIRECTIVE_CAP
+
+    # Kernel purity against the committed ocean-grain twin: same OCEAN section,
+    # same derived params, cosine 1.0.
+    ride_ocean = p7_personality.load_profile("ridealong")
+
+    def _ocean_section(text: str) -> str:
+        i = text.index("## Personality (OCEAN)")
+        j = text.find("\n## ", i + 3)
+        return text[i : j if j != -1 else None].strip()
+
+    assert _ocean_section(p7_personality.compile_persona(facet_prof)) == _ocean_section(
+        p7_personality.compile_persona(ride_ocean)
+    ), "aggregated facets must compile identically to the ocean twin"
+    assert p7_personality.derive(facet_prof) == p7_personality.derive(ride_ocean)
+    assert p7_personality.similarity(facet_prof, ride_ocean) == 1.0
+
+    # The zero-code scan: the committed id never appears in harness source. The
+    # profile is data only, like the P4 scale-out proof.
+    facet_naming = [
+        p
+        for p in (Path.cwd() / "core" / "harness").rglob("*.py")
+        if "facetfull" in p.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert not facet_naming, f"committed facet profile leaked into harness code: {facet_naming}"
+
+    # `-Pfacetfull` 1-task sweep, offline: the data-only profile runs the real
+    # driver at full arithmetic with the PSY lane on.
+    ftmp = Path(tempfile.mkdtemp(prefix="april-p77-facetfull-"))
+    old_zbin = os.environ.get("APRIL_ZCODE_BIN")
+    old_zroot = os.environ.get("APRIL_RUNS_ROOT")
+    os.environ.update(
+        {"APRIL_ZCODE_BIN": str(zstub), "APRIL_RUNS_ROOT": str(ftmp / "runs")}
+    )
+    try:
+        facet_sweep = harness_schedule.run_sweep_zcode(
+            1,
+            runs_root=ftmp / "runs",
+            library_root=ftmp / "library",
+            modes=("agg",),
+            only_tasks=(t0,),
+            max_tasks=1,
+            prop=_DryProposer(),
+            profiles=("facetfull",),
+        )
+    finally:
+        if old_zbin is None:
+            os.environ.pop("APRIL_ZCODE_BIN", None)
+        else:
+            os.environ["APRIL_ZCODE_BIN"] = old_zbin
+        if old_zroot is None:
+            os.environ.pop("APRIL_RUNS_ROOT", None)
+        else:
+            os.environ["APRIL_RUNS_ROOT"] = old_zroot
+    try:
+        assert facet_sweep["profiles"] == ["facetfull"], facet_sweep["profiles"]
+        assert facet_sweep["n_dims"] == 3, facet_sweep["n_dims"]
+        assert facet_sweep["results"]["facetfull"]["library_root"].endswith("/facetfull")
+        frow = facet_sweep["results"]["facetfull"]["domains"][0]["tasks"][0]
+        assert frow["status"] == "ok", frow
+        fns = harness_schedule.ns("zcode", "zcode", "agg", 1, persona="facetfull")
+        assert fns == "zcode-zcode-agg1-Pfacetfull", fns
+        fsum = json.loads(
+            (ftmp / "runs" / fns / t0.replace("/", "__") / "summary.json").read_text()
+        )
+        assert fsum["persona"] == "facetfull", fsum.get("persona")
+        fled = fsum["modes"]["agg"]["ledger"]
+        assert (fled["n_dims"], fled["R"], fled["P"]) == (3, 5, 4), fled
+        assert fled["R"] == fled["expected_R"] and fled["P"] == fled["expected_P"], fled
+        fmarks = list((ftmp / "runs").rglob(".adapt_complete"))
+        assert len(fmarks) == 4, len(fmarks)
+        assert all(zadapter.delivered(m.parent) for m in fmarks), "marked rollout lost deliverable"
+    finally:
+        shutil.rmtree(ftmp, ignore_errors=True)
+    checks.append(
+        "P7-7 facet profile: profiles/facetfull.json is data only (no harness source "
+        "names it); all 30 facets, 6 per domain, aggregate by hand-computed half-up "
+        "means to ridealong's OCEAN vector (identical OCEAN section + derived params, "
+        "cosine 1.0); a 1-task sweep yields -Pfacetfull with R=5=5k, P=4=4k, PSY on"
+    )
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")

@@ -459,7 +459,9 @@ mirror of the aggregation (the archive stays the verbatim pre-P6 reference; the
 bun cross-check pins ocean-grain only), and no committed facet-grain profile —
 `demo()` constructs facet profiles in tmp dirs only, because committed profiles
 are asserted to compile `## Voice`/`## Honesty` and a facet profile would only
-coincidentally do so.
+coincidentally do so. (The committed-profile ponytail was promoted in P7-7:
+`profiles/facetfull.json` is a full-coverage facet profile whose non-degraded
+branch compiles `## Voice`/`## Honesty` for real.)
 
 Acceptance: `python3 -m core.agent` is green at **24 `ok:` lines** (23 engine
 pins + the demo's bun TS cross-check) with no model / no network / no device;
@@ -632,6 +634,26 @@ logic, so user-owned TUI streams can absorb these without conflicts.
 empty.
 
 
+
+### P7-7 — Committed facet-grain profile (landed 2026-11-04)
+
+`profiles/facetfull.json` is the canonical facet-grain profile: all 30 standard
+facets, six per domain, and no `ocean` key. The loader aggregates it before the
+untouched kernel sees it, so its hand-computed half-up domain means
+(`O 60 / C 55 / E 50 / A 85 / N 15`) land exactly on `ridealong`'s vector —
+identical `## Personality (OCEAN)` section, identical `DerivedParams`, cosine
+1.0 — while the non-degraded branch compiles `## Voice`/`## Honesty` for real.
+The 18 facet directive lines render 1365 chars, well under
+`FACET_DIRECTIVE_CAP` (3000). Self-check pin 30 runs the data-only proof: the
+facets are regrouped in the check and the domain means are computed by hand
+(half-up, not delegated to `aggregate_facets`), the harness source is scanned
+for the id (clean), and a 1-task offline `-Pfacetfull` sweep yields the real
+driver at `R=5=5k`, `P=4=4k`, `n_dims=3` with four marked rollouts and a
+deliverable in each. `docs/spec/ocean-profile-schema.md` §8 documents the
+facet-grain recipe with `facetfull` as the canonical example, and §9 lists it
+alongside `ridealong`. No harness code changed to support the profile; the P6
+"no committed facet-grain profile" ponytail is promoted. `python3 -m core.agent`
+green at 30 ok; `git -C ZCode status --porcelain` empty.
 
 ---
 
