@@ -655,6 +655,50 @@ alongside `ridealong`. No harness code changed to support the profile; the P6
 "no committed facet-grain profile" ponytail is promoted. `python3 -m core.agent`
 green at 30 ok; `git -C ZCode status --porcelain` empty.
 
+### P7-8 — External gates: harness2 re-sync (landed 2026-11-04)
+
+The external re-sync gate opened when the `harness2/` checkout appeared and was
+already tracked as a git repo (origin `google-research/harness2`). It is pinned at
+`6868817` (2026-11-02): a `git fetch` found **no newer upstream commits**, so
+there is nothing to fast-forward and no vendor file was re-copied. Auditing the
+five upstream fixes in the window produced one port and one deliberate non-port:
+
+- **#13 ported** (`e9db57b`) — `Proposer._opencode` now computes the JSONL event
+  fold *before* it looks for `output/answer.md`. The answer file is written by the
+  agent, so a crashed session can leave a stale answer behind; caching it turns a
+  failed proposal into a plausible one. A session error now returns `("", cost,
+  err)` and the answer file is never consulted. Pinned by self-check 27, which
+  stubs `_opencode_dir` and `subprocess.run` (no real checkout, no model) and
+  asserts a stale `answer.md` loses to an `error` event.
+- **#110 NOT ported** (`36608f0`) — upstream adds `Stage.execution_failed` so a
+  proposer exception marks the mode not-ok. APRIL's offline `_DryProposer`
+  **fails closed by design**, so that flag would mark every dry mode not-ok and
+  break the P0 fallback contract the self-checks rely on. Recorded in place with a
+  `# ponytail:` note on `ModeResult.ok`; revisit if a live proposer becomes the
+  only path or the dry stand-in stops raising.
+- **#33 already present** (`aa02dbc`) — APRIL writes the on-surface tree back on
+  the off-surface rejection path already (`recursion.write_tree(surface, new, …)`),
+  so no change.
+- **#112 / #122 skipped** — both are jobbench (`harness2/benchmarks/`) rollout
+  isolation and non-zero-exit trajectory notes. APRIL vendors `core/` only; it
+  has no jobbench runner, so there is nothing to patch.
+
+`prompts.VERSION` stays `harness2-2` (the P7-2 bump); upstream's copy carries the
+same value by design. Provenance in `CLAUDE.md` now records the pin, the port and
+the non-port rationale.
+
+**Live leg (Free-plan fallback).** The GLM 5.3 Flash leg stayed user-gated on
+spend; with the account on the Free plan (GLM returns 402 there) the user chose
+the free `beam:cloud` gateway for one live loop at ocean grain. It ran cleanly:
+persona boot `source=deployed:default`, temperature `0.69`, a 6367-char system
+prompt, local fact **count** 4 (text never recorded), two `shell_execute` calls
+(`git branch --show-current` + a read-only ZCode porcelain count), and a correct
+final answer (`feature/textual-tui`, ZCode clean). Usage 1681 + 1761 tokens;
+**paid spend $0.00**. Evidence lives at `runs/p7-8-live/beam-cloud.md` (git-ignored
+runtime data). GLM remains config-only/deferred until a spend decision changes the
+plan. `python3 -m core.agent` green at 31 ok; `git -C ZCode status --porcelain`
+empty.
+
 ---
 
 ## Superseded documents (removed 2026-10-31, preserved in git history)

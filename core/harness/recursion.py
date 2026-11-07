@@ -72,6 +72,11 @@ class ModeResult:
 
     @property
     def ok(self) -> bool:
+        # ponytail: upstream #110 adds `Stage.execution_failed` so a proposer
+        # exception marks the mode not-ok. Deliberately not ported: the offline
+        # `_DryProposer` fails closed by design, so that flag would mark every
+        # dry mode not-ok and break the P0 fallback contract. Revisit if a live
+        # proposer becomes the only path or the dry stand-in stops raising.
         return bool(self.finals) and not self.errors
 
     @property

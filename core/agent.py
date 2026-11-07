@@ -2130,6 +2130,59 @@ if __name__ == '__main__':
         "cosine 1.0); a 1-task sweep yields -Pfacetfull with R=5=5k, P=4=4k, PSY on"
     )
 
+    # 27. P7-8: upstream re-sync. The OpenCode channel must reject a session error
+    # BEFORE it can cache an answer file (#13): a failed session that left a stale
+    # output/answer.md must not become the proposal. No real checkout or model is
+    # used — `_opencode_dir` and `subprocess.run` are stubbed, so this stays offline.
+    from core.harness import proposer as p7_proposer
+    octmp = Path(tempfile.mkdtemp(prefix="april-p78-opencode-"))
+    old_oc_dir = p7_proposer.config.OPENCODE_DIR
+    old_oc_helper = p7_proposer._opencode_dir
+    old_oc_run = p7_proposer.subprocess.run
+    try:
+        p7_proposer.config.OPENCODE_DIR = str(octmp / "checkout")
+        p7_proposer._opencode_dir = lambda: Path(p7_proposer.config.OPENCODE_DIR)
+
+        def _fake_opencode_run(cmd, **kwargs):
+            cwd = Path(kwargs.get("cwd") or ".")
+            (cwd / "output").mkdir(parents=True, exist_ok=True)
+            (cwd / "output" / "answer.md").write_text(
+                "stale answer from a failed session", encoding="utf-8"
+            )
+
+            class _P:
+                returncode = 0
+                stdout = (
+                    '{"type":"error","error":{"name":"APIError","data":'
+                    '{"message":"session crashed"}}}\n'
+                )
+                stderr = ""
+
+            return _P()
+
+        p7_proposer.subprocess.run = _fake_opencode_run
+        oc_prop = p7_proposer.Proposer(
+            spec=resolve_channel_model(kind="opencode", model="test-model")
+        )
+        oc_work = octmp / "work"
+        oc_work.mkdir()
+        oc_text, oc_cost, oc_err = oc_prop._opencode(oc_work, "mission", "", 10)
+        assert oc_text == "", (
+            "a session error must not be cached as the answer; got "
+            f"{oc_text!r} (err={oc_err!r})"
+        )
+        assert "session crashed" in oc_err, oc_err
+        assert oc_cost == 0.0, oc_cost
+    finally:
+        p7_proposer.config.OPENCODE_DIR = old_oc_dir
+        p7_proposer._opencode_dir = old_oc_helper
+        p7_proposer.subprocess.run = old_oc_run
+        shutil.rmtree(octmp, ignore_errors=True)
+    checks.append(
+        "P7-8 upstream re-sync: OpenCode session errors win over a stale "
+        "output/answer.md (#13), with no real checkout or model (offline stub)"
+    )
+
     for line in checks:
         print(f"  ok: {line}")
     print("APRIL offline self-checks passed.")

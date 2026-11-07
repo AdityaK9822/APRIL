@@ -317,10 +317,16 @@ class Proposer:
             timeout=wall,
         )
         cost = _opencode_cost(p.stdout)
+        # P7-8 re-sync (upstream #13): a session error wins over a stale
+        # output/answer.md. The file is written by the agent, so a crashed
+        # session can leave an old answer behind; caching it would turn a
+        # failed call into a plausible proposal.
+        text, err = _opencode_stdout(p.stdout)
+        if err:
+            return "", cost, err
         ans = out / "answer.md"
         if ans.is_file() and ans.read_text(errors="replace").strip():
             return ans.read_text(errors="replace"), cost, ""
-        text, err = _opencode_stdout(p.stdout)
         if text.strip():
             return text, cost, ""
         tail = _strip_oc_banner(p.stderr or "").strip()[-300:]
