@@ -23,6 +23,7 @@ from .widgets.messages import MessageList
 from .widgets.input import InputWidget
 from .widgets.logs import LogPanel
 from .widgets.stats import StatsWidget
+from .widgets.harness_status import HarnessStatusWidget
 from .config import AgentConfig
 from .agent import AgentRuntime
 from .logger import APRILLogger
@@ -65,6 +66,7 @@ class APRILApp(App):
         yield Header()
         
         yield StatusWidget()
+        yield HarnessStatusWidget()
         
         with Horizontal():
             yield MessageList()

@@ -1,0 +1,206 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-shell: var(--bg-shell);
+  --color-shell-panel: var(--bg-shell-panel);
+  --color-shell-card: var(--bg-shell-card);
+  --color-shell-hover: var(--bg-shell-hover);
+  --color-shell-bubble: var(--bg-shell-bubble);
+  --color-shell-input: var(--bg-shell-input);
+  --color-shell-border: var(--bg-shell-border);
+  --color-shell-border-strong: var(--bg-shell-border-strong);
+  --color-shell-accent: var(--bg-shell-accent);
+  --color-shell-accent-hover: var(--bg-shell-accent-hover);
+  --color-shell-accent-soft: var(--bg-shell-accent-soft);
+  --color-shell-foreground: var(--fg-shell-foreground);
+  --color-shell-muted: var(--fg-shell-muted);
+  --color-shell-subtle: var(--fg-shell-subtle);
+  --color-shell-accent-fg: var(--fg-shell-accent-soft);
+  --color-shell-ring: var(--fg-shell-ring);
+}
+
+:root {
+  color-scheme: light;
+  accent-color: var(--bg-shell-accent);
+  /* Light theme — every pairing verified >= 4.5:1 (text) / 3:1 (UI) */
+  --bg-shell: #edf0f5;
+  --bg-shell-panel: #ffffff;
+  --bg-shell-card: #f6f8fb;
+  --bg-shell-hover: #e7ebf2;
+  --bg-shell-bubble: #e2eaf4;
+  --bg-shell-input: #ffffff;
+  --bg-shell-border: #ccd3dd;
+  --bg-shell-border-strong: #a8b2c2;
+  --bg-shell-accent: #0369a1;
+  --bg-shell-accent-hover: #0a5d8e;
+  --bg-shell-accent-soft: #ddeefa;
+  --fg-shell-foreground: #141a20;
+  --fg-shell-muted: #454e5b;
+  --fg-shell-subtle: #565e6b;
+  --fg-shell-accent-soft: #0f5b85;
+  --fg-shell-ring: #0369a1;
+}
+
+.dark {
+  color-scheme: dark;
+  /* Dark theme — same roles, every pairing verified >= 4.5:1 (text) / 3:1 (UI) */
+  --bg-shell: #0b0e13;
+  --bg-shell-panel: #11151c;
+  --bg-shell-card: #161b24;
+  --bg-shell-hover: #1f2632;
+  --bg-shell-bubble: #1c2230;
+  --bg-shell-input: #0d1117;
+  --bg-shell-border: #272e3a;
+  --bg-shell-border-strong: #39414f;
+  --bg-shell-accent: #0369a1;
+  --bg-shell-accent-hover: #0a5d8e;
+  --bg-shell-accent-soft: #162d3b;
+  --fg-shell-foreground: #edf1f7;
+  --fg-shell-muted: #b5bdca;
+  --fg-shell-subtle: #8a93a5;
+  --fg-shell-accent-soft: #7dd3fc;
+  --fg-shell-ring: #7dd3fc;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg-shell);
+  color: var(--fg-shell-foreground);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-shell-border-strong);
+  border-radius: 4px;
+}
+
+/* One motion source: colors + press feedback, always reduced-motion aware */
+button,
+.input,
+.tab,
+.chip {
+  transition:
+    transform 160ms ease-out,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* ---------------------------------------------------------------- */
+/* Shared component vocabulary — every control uses one of these.    */
+/* ---------------------------------------------------------------- */
+
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-ghost {
+  @apply inline-flex cursor-pointer select-none items-center justify-center gap-1.5 rounded-md text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-shell-ring;
+}
+
+.btn-primary {
+  @apply bg-shell-accent text-white hover:bg-shell-accent-hover disabled:cursor-not-allowed disabled:opacity-45;
+}
+
+.btn-secondary {
+  @apply border border-shell-border bg-shell-card text-shell-foreground hover:border-shell-border-strong hover:bg-shell-hover disabled:cursor-not-allowed disabled:opacity-45;
+}
+
+.btn-ghost {
+  @apply bg-transparent text-shell-muted hover:bg-shell-hover hover:text-shell-foreground disabled:cursor-not-allowed disabled:opacity-45;
+}
+
+.btn-icon {
+  @apply h-8 w-8 shrink-0;
+}
+
+.input {
+  @apply w-full rounded-md border border-shell-border bg-shell-input px-3 py-2 text-sm text-shell-foreground outline-none placeholder:text-shell-subtle hover:border-shell-border-strong focus-visible:border-shell-ring focus-visible:ring-2 focus-visible:ring-shell-ring;
+}
+
+.tab {
+  @apply inline-flex h-7 cursor-pointer items-center rounded-md px-2.5 text-xs font-medium text-shell-subtle outline-none hover:bg-shell-hover hover:text-shell-foreground focus-visible:ring-2 focus-visible:ring-shell-ring;
+}
+
+.tab-active {
+  @apply bg-shell-hover text-shell-foreground;
+}
+
+.chip {
+  @apply inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap text-shell-subtle outline-none;
+}
+
+.chip-card {
+  @apply border border-shell-border bg-shell-card;
+}
+
+.chip-live {
+  @apply bg-shell-accent-soft font-medium text-shell-accent-fg;
+}
+
+.card-row {
+  @apply rounded-lg border border-shell-border bg-shell-card px-3 py-2.5 text-sm text-shell-foreground;
+}
+
+.panel {
+  @apply rounded-xl border border-shell-border bg-shell-panel;
+}
+
+.panel-head {
+  @apply border-b border-shell-border px-4 py-2.5 text-xs font-medium tracking-wider text-shell-subtle uppercase;
+}
+
+.field-label {
+  @apply text-xs font-medium text-shell-muted;
+}
+
+.hint {
+  @apply text-xs text-shell-subtle;
+}
+
+/* Terminals stay dark in both themes — deliberate, like code blocks */
+.terminal {
+  @apply rounded-lg border border-shell-border bg-[#0d1117] p-3 font-mono text-xs text-[#4ade80];
+}
+
+.markdown-body pre {
+  background: #0d1117 !important;
+  color: #e6edf3;
+  border-radius: 0.5rem;
+  border: 1px solid var(--bg-shell-border);
+}
+
+.markdown-body code {
+  color: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .input,
+  .tab,
+  .chip {
+    transition: none;
+  }
+  button:active:not(:disabled) {
+    transform: none;
+  }
+  .animate-pulse,
+  .animate-spin {
+    animation: none;
+  }
+}

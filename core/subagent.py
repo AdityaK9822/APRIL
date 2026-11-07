@@ -5,8 +5,9 @@ Enables spawning specialized agents for specific tasks,
 dispatching work, and aggregating results.
 """
 
+from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime
 from enum import Enum
 import uuid
@@ -148,28 +149,32 @@ class SubagentProcess:
     Manages execution lifecycle and state.
     """
 
-    def __init__(self, config: SubagentConfig, agent_config: AgentConfig):
+    def __init__(self, config: SubagentConfig, agent_config: AgentConfig, runtime: Optional[AgentRuntime] = None):
         """
         Initialize subagent process
 
         Args:
             config: Subagent configuration
             agent_config: Agent configuration for runtime
+            runtime: Pre-built agent runtime to use (default: a fresh AgentRuntime;
+                inject one to substitute a test or alternate runtime)
         """
         self.id = str(uuid.uuid4())[:8]
         self.config = config
         self.agent_config = agent_config
 
-        # Create isolated agent runtime
-        self.agent = AgentRuntime(agent_config)
+        # Create isolated agent runtime (injected, or built fresh)
+        self.agent = runtime if runtime is not None else AgentRuntime(agent_config)
 
-        # Set session metadata
-        self.agent.session.metadata.update({
-            'subagent_id': self.id,
-            'subagent_name': config.name,
-            'subagent_role': config.role,
-            'parent_id': config.parent_id
-        })
+        # Set session metadata (only meaningful for runtimes that have a session)
+        session = getattr(self.agent, "session", None)
+        if session is not None:
+            session.metadata.update({
+                'subagent_id': self.id,
+                'subagent_name': config.name,
+                'subagent_role': config.role,
+                'parent_id': config.parent_id
+            })
 
         self.status = SubagentStatus.IDLE
         self.current_task: Optional[Task] = None
@@ -180,6 +185,9 @@ class SubagentProcess:
         # Task queue for threading (future use)
         self._task_queue = queue.Queue()
         self._result_queue = queue.Queue()
+        
+        # Serializes concurrent dispatches to this subagent: one task at a time
+        self._run_lock = threading.Lock()
 
     def run(self, task: Task) -> Result:
         """
@@ -191,44 +199,46 @@ class SubagentProcess:
         Returns:
             Execution result
         """
-        self.current_task = task
-        self.status = SubagentStatus.RUNNING
-        task.status = TaskStatus.RUNNING
+        # One task at a time per subagent; parallel dispatches queue here
+        with self._run_lock:
+            self.current_task = task
+            self.status = SubagentStatus.RUNNING
+            task.status = TaskStatus.RUNNING
 
-        try:
-            # Execute task via agent
-            response = self.agent.run(
-                task.description,
-                max_iterations=self.config.max_iterations
-            )
+            try:
+                # Execute task via agent
+                response = self.agent.run(
+                    task.description,
+                    max_iterations=self.config.max_iterations
+                )
 
-            # Create successful result
-            self.result = Result(
-                task_id=task.id,
-                subagent_id=self.id,
-                success=True,
-                data=response,
-                metadata={'task_type': task.type}
-            )
+                # Create successful result
+                self.result = Result(
+                    task_id=task.id,
+                    subagent_id=self.id,
+                    success=True,
+                    data=response,
+                    metadata={'task_type': task.type}
+                )
 
-            task.status = TaskStatus.COMPLETED
-            self.status = SubagentStatus.COMPLETED
+                task.status = TaskStatus.COMPLETED
+                self.status = SubagentStatus.COMPLETED
 
-        except Exception as e:
-            # Create failed result
-            self.result = Result(
-                task_id=task.id,
-                subagent_id=self.id,
-                success=False,
-                data=None,
-                error=str(e)
-            )
+            except Exception as e:
+                # Create failed result
+                self.result = Result(
+                    task_id=task.id,
+                    subagent_id=self.id,
+                    success=False,
+                    data=None,
+                    error=str(e)
+                )
 
-            task.status = TaskStatus.FAILED
-            self.status = SubagentStatus.FAILED
+                task.status = TaskStatus.FAILED
+                self.status = SubagentStatus.FAILED
 
-        self.completed_at = datetime.now()
-        return self.result
+            self.completed_at = datetime.now()
+            return self.result
 
     def get_status(self) -> Dict:
         """
@@ -260,16 +270,27 @@ class SubagentManager:
     Provides interface for spawning, dispatching, and collecting results.
     """
 
-    def __init__(self, config: AgentConfig):
+    def __init__(self, config: AgentConfig, max_workers: Optional[int] = None, runtime_factory: Optional[Callable[[AgentConfig], AgentRuntime]] = None):
         """
         Initialize subagent manager
 
         Args:
             config: Agent configuration for subagents
+            max_workers: Thread pool size for parallel dispatch (default: pool default)
+            runtime_factory: Optional factory that builds each spawned subagent's
+                runtime (default: AgentRuntime); enables test and alternate runtimes
         """
         self.config = config
         self.subagents: Dict[str, SubagentProcess] = {}
         self.created_at = datetime.now()
+        
+        # Tasks run on a thread pool: subagent work is LLM/network-bound, so
+        # overlapping the waits gives real concurrency without process overhead
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="april-subagent"
+        )
+        self._runtime_factory = runtime_factory or (lambda cfg: AgentRuntime(cfg))
 
     def spawn(self, subagent_config: SubagentConfig) -> SubagentProcess:
         """
@@ -287,7 +308,11 @@ class SubagentManager:
             ...     role="file-operations"
             ... ))
         """
-        process = SubagentProcess(subagent_config, self.config)
+        process = SubagentProcess(
+            subagent_config,
+            self.config,
+            runtime=self._runtime_factory(self.config)
+        )
         self.subagents[process.id] = process
         return process
 
@@ -315,17 +340,77 @@ class SubagentManager:
         """
         Dispatch task and wait for result
 
+        Runs on the manager's thread pool so a timeout is actually enforced.
+
         Args:
             subagent_id: Subagent ID
             task: Task to execute
-            timeout: Timeout in seconds
+            timeout: Timeout in seconds; None waits indefinitely
 
         Returns:
             Execution result
+
+        Raises:
+            ValueError: If subagent not found
+            TimeoutError: If the task did not finish within `timeout`
+                (the task itself keeps running past the timeout)
         """
-        # For now, synchronous execution
-        # In future, add threading for async
-        return self.dispatch(subagent_id, task)
+        future = self.dispatch_async(subagent_id, task)
+        return future.result(timeout=timeout)
+
+    def dispatch_async(self, subagent_id: str, task: Task) -> "Future[Result]":
+        """
+        Dispatch task without waiting for completion
+
+        Args:
+            subagent_id: Subagent ID
+            task: Task to execute
+
+        Returns:
+            Future resolving to the task's Result
+
+        Raises:
+            ValueError: If subagent not found
+        """
+        if subagent_id not in self.subagents:
+            raise ValueError(f"Subagent {subagent_id} not found")
+
+        subagent = self.subagents[subagent_id]
+        return self._executor.submit(subagent.run, task)
+
+    def dispatch_parallel(self, tasks: Dict[str, Task]) -> Dict[str, Result]:
+        """
+        Dispatch one task to each of many subagents concurrently
+
+        Args:
+            tasks: Mapping of subagent ID to Task
+
+        Returns:
+            Mapping of subagent ID to its Result
+
+        Raises:
+            ValueError: If any subagent id is not found
+        """
+        for subagent_id in tasks:
+            if subagent_id not in self.subagents:
+                raise ValueError(f"Subagent {subagent_id} not found")
+
+        futures = {
+            subagent_id: self._executor.submit(self.subagents[subagent_id].run, task)
+            for subagent_id, task in tasks.items()
+        }
+        # subagent.run converts agent errors into failed Results, so
+        # .result() only raises on unrecoverable dispatch problems
+        return {subagent_id: future.result() for subagent_id, future in futures.items()}
+
+    def shutdown(self, wait: bool = False):
+        """
+        Shut down the dispatch thread pool
+
+        Args:
+            wait: True blocks until all running tasks finish
+        """
+        self._executor.shutdown(wait=wait)
 
     def get_result(self, subagent_id: str) -> Optional[Result]:
         """
@@ -441,6 +526,7 @@ if __name__ == "__main__":
 
         # Cleanup
         manager.kill_all()
+        manager.shutdown(wait=True)
         print("\nAll subagents killed")
 
     except Exception as e:

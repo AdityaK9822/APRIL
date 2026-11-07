@@ -9,5 +9,6 @@ from .messages import MessageList
 from .input import InputWidget
 from .logs import LogPanel
 from .stats import StatsWidget
+from .harness_status import HarnessStatusWidget
 
-__all__ = ['StatusWidget', 'MessageList', 'InputWidget', 'LogPanel', 'StatsWidget']
+__all__ = ['StatusWidget', 'MessageList', 'InputWidget', 'LogPanel', 'StatsWidget', 'HarnessStatusWidget']

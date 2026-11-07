@@ -188,6 +188,15 @@ class AgentConfig:
         
         return config
     
+    def validate(self) -> bool:
+        """
+        Basic config sanity check for running the agent
+
+        Returns:
+            True when every required field is set, False otherwise
+        """
+        return bool(self.model) and bool(self.api_key) and bool(self.api_base_url)
+
     @classmethod
     def from_yaml(cls, yaml_path: str) -> 'AgentConfig':
         """

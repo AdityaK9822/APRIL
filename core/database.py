@@ -8,11 +8,28 @@ Optimized with connection pooling and proper error handling.
 
 import sqlite3
 import json
+import hashlib
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 import weakref
+
+
+def memory_hash(memory_type: str, content: Dict) -> str:
+    """
+    Stable dedup key for a memory
+
+    Identical (memory_type, content) pairs produce identical hashes
+    regardless of dictionary key order, so the same knowledge can be
+    stored exactly once.
+    """
+    payload = json.dumps(
+        {'type': memory_type, 'content': content},
+        sort_keys=True,
+        ensure_ascii=False
+    )
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()[:32]
 
 
 class ConnectionPool:
@@ -211,6 +228,7 @@ class MemoryDatabase:
                 confidence REAL DEFAULT 0.5,
                 tags TEXT,
                 source_message_ids TEXT,
+                content_hash TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -223,6 +241,44 @@ class MemoryDatabase:
         self.pool.execute("""
             CREATE INDEX IF NOT EXISTS idx_memory_session 
             ON memory(session_id)
+        """)
+        
+        # Migration: databases created before memory dedup lack content_hash
+        columns = {row[1] for row in self.pool.fetchall("PRAGMA table_info(memory)")}
+        if columns and 'content_hash' not in columns:
+            self.pool.execute("ALTER TABLE memory ADD COLUMN content_hash TEXT")
+        
+        # Backfill hashes for memories stored before the column existed
+        rows = self.pool.fetchall(
+            "SELECT id, memory_type, content FROM memory WHERE content_hash IS NULL"
+        )
+        for row in rows:
+            try:
+                content = json.loads(row['content'])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            self.pool.execute(
+                "UPDATE memory SET content_hash = ? WHERE id = ?",
+                (memory_hash(row['memory_type'], content), row['id'])
+            )
+        
+        # Collapse duplicates introduced before hashing existed (keep earliest)
+        seen = set()
+        for row in self.pool.fetchall(
+            "SELECT id, memory_type, content_hash FROM memory "
+            "WHERE content_hash IS NOT NULL ORDER BY id ASC"
+        ):
+            key = (row['memory_type'], row['content_hash'])
+            if key in seen:
+                self.pool.execute("DELETE FROM memory WHERE id = ?", (row['id'],))
+            else:
+                seen.add(key)
+        
+        # Exactly-once enforcement: at most one memory per (type, content hash)
+        self.pool.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_content_hash
+            ON memory(memory_type, content_hash)
+            WHERE content_hash IS NOT NULL
         """)
         
         # Sessions table
@@ -296,16 +352,53 @@ class MemoryDatabase:
         tags: List[str] = None,
         source_message_ids: List[int] = None
     ) -> int:
-        """Save extracted memory"""
-        cursor = self.pool.execute("""
-            INSERT INTO memory 
-            (session_id, memory_type, content, confidence, tags, source_message_ids)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            session_id, memory_type, json.dumps(content), confidence,
-            json.dumps(tags or []), json.dumps(source_message_ids or [])
-        ))
-        return cursor.lastrowid
+        """
+        Save extracted memory, deduplicated
+        
+        Identical (memory_type, content) memories are stored exactly once,
+        across sessions: re-saving the same knowledge returns the existing
+        row's id instead of inserting a duplicate.
+        
+        Args:
+            session_id: Session the memory came from
+            memory_type: One of fact, decision, solution, preference
+            content: Memory payload (typically {"text": "..."})
+            confidence: Extraction confidence (0.0 to 1.0)
+            tags: Optional list of tags
+            source_message_ids: Conversation rows the memory came from
+            
+        Returns:
+            New or existing memory row id
+        """
+        content_hash = memory_hash(memory_type, content)
+        
+        existing = self.pool.fetchone(
+            "SELECT id FROM memory WHERE memory_type = ? AND content_hash = ?",
+            (memory_type, content_hash)
+        )
+        if existing:
+            return existing['id']
+        
+        try:
+            cursor = self.pool.execute("""
+                INSERT INTO memory 
+                (session_id, memory_type, content, confidence, tags, source_message_ids, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id, memory_type, json.dumps(content), confidence,
+                json.dumps(tags or []), json.dumps(source_message_ids or []),
+                content_hash
+            ))
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            # A concurrent writer stored the same memory first: return its id
+            existing = self.pool.fetchone(
+                "SELECT id FROM memory WHERE memory_type = ? AND content_hash = ?",
+                (memory_type, content_hash)
+            )
+            if existing:
+                return existing['id']
+            raise
     
     def get_memories(
         self,
