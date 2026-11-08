@@ -4,11 +4,35 @@ import unittest
 import os
 import tempfile
 import json
+import sqlite3
 from datetime import datetime
 
 from core.database import MemoryDatabase
 from core.memory_extractor import MemoryExtractor
 from core.config import AgentConfig
+
+
+def fake_client(response_json: str):
+    """
+    Minimal OpenAI-compatible double for extraction tests
+
+    Records every prompt it receives into .calls and always returns
+    response_json as the assistant message content.
+    """
+    from types import SimpleNamespace
+
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=response_json))]
+    )
+
+    def create(**kwargs):
+        client.calls.append(kwargs)
+        return response
+
+    client = SimpleNamespace()
+    client.calls = []
+    client.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+    return client
 
 
 class TestMemoryDatabase(unittest.TestCase):
@@ -83,6 +107,112 @@ class TestMemoryDatabase(unittest.TestCase):
         self.assertIn('total_messages', stats)
         self.assertIn('total_memories', stats)
         self.assertIn('total_sessions', stats)
+    
+    def test_save_memory_dedup(self):
+        """Identical memory content is stored once, wherever re-saved"""
+        first = self.db.save_memory("s1", "fact", {"text": "User prefers dark theme"}, tags=["ui"])
+        second = self.db.save_memory("s2", "fact", {"text": "User prefers dark theme"}, tags=["ui"])
+        
+        self.assertEqual(first, second)
+        self.assertEqual(len(self.db.get_memories(limit=10)), 1)
+    
+    def test_dedup_respects_memory_type(self):
+        """Same content under different types are distinct memories"""
+        fact = self.db.save_memory("s1", "fact", {"text": "Switched to local model"})
+        decision = self.db.save_memory("s1", "decision", {"text": "Switched to local model"})
+        
+        self.assertNotEqual(fact, decision)
+        self.assertEqual(len(self.db.get_memories(limit=10)), 2)
+    
+    def test_dedup_respects_content(self):
+        """Different content saves as distinct memories"""
+        a = self.db.save_memory("s1", "fact", {"text": "Prefers dark theme"})
+        b = self.db.save_memory("s1", "fact", {"text": "Prefers light theme"})
+        
+        self.assertNotEqual(a, b)
+
+
+class TestIncrementalExtraction(unittest.TestCase):
+    """extract_incremental must target new messages, not re-extract history"""
+    
+    def setUp(self):
+        self.extractor = MemoryExtractor()
+    
+    def test_extracts_only_new_with_old_as_context(self):
+        """New messages are the extraction target; old messages are context"""
+        extraction = {"extractions": [
+            {"type": "preference", "content": {"text": "User prefers the TUI"},
+             "confidence": 0.9, "tags": ["ui"]}
+        ]}
+        client = fake_client(json.dumps(extraction))
+        
+        old = [
+            {"role": "user", "content": "Hi, I am Alex"},
+            {"role": "assistant", "content": "Hello Alex"}
+        ]
+        new = [{"role": "user", "content": "I prefer the TUI"}]
+        
+        memories = self.extractor.extract_incremental(old, new, client=client)
+        
+        self.assertEqual(len(client.calls), 1, "expected exactly one LLM call")
+        prompt = client.calls[0]["messages"][0]["content"]
+        self.assertIn("I prefer the TUI", prompt)      # new messages are the target
+        self.assertIn("Hi, I am Alex", prompt)          # old messages appear as context
+        self.assertIn("do NOT extract", prompt)         # old messages marked as context
+        self.assertEqual(len(memories), 1)
+        self.assertEqual(memories[0]["type"], "preference")
+    
+    def test_skips_llm_when_nothing_new(self):
+        """Empty new_messages: no LLM call, empty result"""
+        client = fake_client('{"extractions": []}')
+        
+        memories = self.extractor.extract_incremental(
+            [{"role": "user", "content": "old"}], [], client=client
+        )
+        
+        self.assertEqual(memories, [])
+        self.assertEqual(client.calls, [], "no LLM call when there is nothing new")
+
+
+class TestDatabaseMigration(unittest.TestCase):
+    """Databases created before content_hash migrate onto dedup cleanly"""
+    
+    def test_legacy_db_migrates_and_dedups(self):
+        """A pre-hash database backfills hashes and dedups instead of re-inserting"""
+        handle = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        handle.close()
+        conn = sqlite3.connect(handle.name)
+        conn.execute("""
+            CREATE TABLE memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                memory_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                tags TEXT,
+                source_message_ids TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute(
+            "INSERT INTO memory (session_id, memory_type, content, confidence, tags, source_message_ids) "
+            "VALUES (?, 'fact', ?, 0.9, '[]', '[]')",
+            ("s1", json.dumps({"text": "legacy fact"}))
+        )
+        conn.commit()
+        conn.close()
+        
+        db = MemoryDatabase(handle.name)
+        try:
+            duplicate_id = db.save_memory("s1", "fact", {"text": "legacy fact"})
+            memories = db.get_memories(limit=10)
+            
+            self.assertEqual(len(memories), 1, "legacy duplicate must not be re-inserted")
+            self.assertEqual(duplicate_id, memories[0]['id'])
+            self.assertIsNotNone(memories[0]['content_hash'])
+        finally:
+            db.close()
+            os.unlink(handle.name)
 
 
 class TestMemoryExtractor(unittest.TestCase):

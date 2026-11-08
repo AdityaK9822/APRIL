@@ -174,3 +174,28 @@ class BackendLoggerBridge:
             message: Error message
         """
         self.logger.error(f"[ERROR] {error_type}: {message}")
+
+
+    def log_harness_event(self, event_type: str, details: str = "", real_time: bool = False):
+        """Log Harness² execution events with [HARNESS] tag."""
+        self.logger.info(f"[HARNESS] {event_type}: {details}".rstrip(": "))
+        if real_time and self.real_time_callback:
+            with self._callback_lock:
+                if self.real_time_callback:
+                    self.real_time_callback(f"[HARNESS] {event_type}", "INFO")
+
+    def log_recursion_event(self, event_type: str, details: str = "", real_time: bool = False):
+        """Log recursion-stage events with [RECURSION] tag."""
+        self.logger.info(f"[RECURSION] {event_type}: {details}".rstrip(": "))
+        if real_time and self.real_time_callback:
+            with self._callback_lock:
+                if self.real_time_callback:
+                    self.real_time_callback(f"[RECURSION] {event_type}", "INFO")
+
+    def log_lesson_event(self, event_type: str, details: str = "", real_time: bool = False):
+        """Log lesson/library events with [LESSON] tag."""
+        self.logger.info(f"[LESSON] {event_type}: {details}".rstrip(": "))
+        if real_time and self.real_time_callback:
+            with self._callback_lock:
+                if self.real_time_callback:
+                    self.real_time_callback(f"[LESSON] {event_type}", "INFO")

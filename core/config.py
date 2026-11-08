@@ -97,6 +97,11 @@ class AgentConfig:
     max_context_length: int = 128000
     temperature: float = 0.7
     max_iterations: int = 100
+
+    # P5 runtime persona: `APRIL_PERSONA=<id>` boots the deployed (or committed)
+    # persona at runtime — c1 into the system prompt, c2 into the permission
+    # layer, derive().temperature into sampling. Spec: docs/spec/persona-dimension.md
+    persona: str = ""
     
     # Memory configuration (backward compatible)
     memory_enabled: bool = True
@@ -169,16 +174,29 @@ class AgentConfig:
         api_key = os.getenv('OPENAI_API_KEY', '')
         api_base_url = os.getenv('OPENAI_API_BASE_URL', '')
         model = os.getenv('OPENAI_MODEL', 'gemma4:31b-cloud')
-        
+
+        # P5: persona id from the environment (empty = no persona boot)
+        persona = os.getenv('APRIL_PERSONA', '').strip()
+
         # Create config
         config = cls(
             model=model,
             api_key=api_key,
-            api_base_url=api_base_url
+            api_base_url=api_base_url,
+            persona=persona
         )
         
         return config
     
+    def validate(self) -> bool:
+        """
+        Basic config sanity check for running the agent
+
+        Returns:
+            True when every required field is set, False otherwise
+        """
+        return bool(self.model) and bool(self.api_key) and bool(self.api_base_url)
+
     @classmethod
     def from_yaml(cls, yaml_path: str) -> 'AgentConfig':
         """

@@ -1,0 +1,56 @@
+{
+  "schema": "april.devices/1",
+  "segment": "lab-segment (192.0.2.0/24, authorized)",
+  "devices": [
+    {
+      "id": "growlight-2",
+      "class": "relay",
+      "transport": "http",
+      "endpoint": "http://192.0.2.61/cm",
+      "confirming": true,
+      "risk": "low",
+      "capabilities": ["on", "off", "dim"],
+      "state": {"power": "on", "dim": 40, "observed_s_ago": 900}
+    },
+    {
+      "id": "pump-1",
+      "class": "relay",
+      "transport": "mqtt",
+      "endpoint": "topic lab/pump1/set on broker 192.0.2.10:1883",
+      "confirming": false,
+      "risk": "high",
+      "capabilities": ["pump", "off"],
+      "state": {"power": "on", "observed_s_ago": 172800}
+    },
+    {
+      "id": "lab-camera",
+      "class": "camera",
+      "transport": "rtsp",
+      "endpoint": "rtsp://192.0.2.74:8554/main",
+      "confirming": false,
+      "risk": "low",
+      "capabilities": ["snapshot"],
+      "state": {"stream": "up", "observed_s_ago": 600}
+    },
+    {
+      "id": "ecg-2",
+      "class": "sensor",
+      "transport": "serial",
+      "endpoint": "/dev/lab-serial0 115200 8N1",
+      "confirming": false,
+      "risk": "medium",
+      "capabilities": ["stream"],
+      "state": {"link": "up", "lead_off": false, "observed_s_ago": 90000}
+    },
+    {
+      "id": "airq-3",
+      "class": "sensor",
+      "transport": "mqtt",
+      "endpoint": "topic lab/airq3/out on broker 192.0.2.10:1883",
+      "confirming": false,
+      "risk": "low",
+      "capabilities": ["read"],
+      "state": {"co2ppm": 812, "pm25": 14, "observed_s_ago": 200000}
+    }
+  ]
+}

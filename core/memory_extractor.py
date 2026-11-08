@@ -19,11 +19,8 @@ class MemoryExtractor:
     - User preferences
     """
     
-    EXTRACTION_PROMPT = """Analyze the following conversation and extract structured memories.
-
-Conversation:
-{conversation}
-
+    # Shared extraction instructions, used by both prompts below
+    _INSTRUCTIONS = """
 Extract the following types of information:
 1. **Facts**: Objective information learned (e.g., "User prefers VS Code editor")
 2. **Decisions**: Choices made during conversation (e.g., "Decided to use PostgreSQL database")
@@ -52,6 +49,21 @@ If nothing worth remembering, return:
 {{"extractions": []}}
 
 Only return valid JSON. No explanation."""
+
+    EXTRACTION_PROMPT = """Analyze the following conversation and extract structured memories.
+
+Conversation:
+{conversation}
+""" + _INSTRUCTIONS
+
+    INCREMENTAL_EXTRACTION_PROMPT = """Analyze the new messages in this conversation and extract structured memories.
+
+Previously processed context (do NOT extract from this):
+{old_conversation}
+
+New messages (extract ONLY from these):
+{new_conversation}
+""" + _INSTRUCTIONS
 
     def __init__(self, model: str = "gemma4:31b-cloud"):
         """
@@ -107,12 +119,59 @@ Only return valid JSON. No explanation."""
         if not messages:
             return []
         
-        # Format conversation
-        conversation_text = self.format_conversation(messages)
+        prompt = self.EXTRACTION_PROMPT.format(conversation=self.format_conversation(messages))
+        return self._extract_with_prompt(prompt, client=client, fallback_mode=fallback_mode)
+    
+    def extract_incremental(
+        self,
+        old_messages: List[Dict],
+        new_messages: List[Dict],
+        client: "OpenAI" = None,
+        fallback_mode: bool = True
+    ) -> List[Dict]:
+        """
+        Extract memories from the new messages only, using old ones as context
         
-        # Build prompt
-        prompt = self.EXTRACTION_PROMPT.format(conversation=conversation_text)
+        Previously processed messages appear in the prompt for continuity but
+        are excluded from extraction, so the LLM payload stays proportional
+        to the new content instead of growing with the whole conversation
+        history. The previous implementation re-extracted everything on every
+        call, which made extraction cost grow quadratically with history.
         
+        Args:
+            old_messages: Previously processed messages (context only)
+            new_messages: New unprocessed messages (extraction target)
+            client: OpenAI client instance (optional, uses lazy loaded if not provided)
+            fallback_mode: If True, return empty list on error rather than raising
+            
+        Returns:
+            List of extracted memories
+        """
+        if not new_messages:
+            # Nothing new to extract: skip the LLM call entirely
+            return []
+        
+        old_text = self.format_conversation(old_messages) or "(none; this is the first extraction)"
+        prompt = self.INCREMENTAL_EXTRACTION_PROMPT.format(
+            old_conversation=old_text,
+            new_conversation=self.format_conversation(new_messages)
+        )
+        return self._extract_with_prompt(prompt, client=client, fallback_mode=fallback_mode)
+    
+    def _extract_with_prompt(self, prompt: str, client: "OpenAI" = None, fallback_mode: bool = True) -> List[Dict]:
+        """
+        Run one extraction LLM call against a prepared prompt
+        
+        Shared by extract() and extract_incremental().
+        
+        Args:
+            prompt: Fully formatted extraction prompt
+            client: OpenAI client instance (optional, uses lazy loaded if not provided)
+            fallback_mode: If True, return empty list on error rather than raising
+            
+        Returns:
+            List of extracted memories
+        """
         # Get OpenAI client
         if client is None:
             try:
@@ -187,23 +246,6 @@ Only return valid JSON. No explanation."""
             return False
         
         return True
-    
-    def extract_incremental(self, old_messages: List[Dict], new_messages: List[Dict], client: "OpenAI" = None) -> List[Dict]:
-        """
-        Extract only from new messages, using old for context
-        
-        Args:
-            old_messages: Previously processed messages
-            new_messages: New unprocessed messages
-            client: OpenAI client instance
-            
-        Returns:
-            List of extracted memories
-        """
-        # For now, extract from all messages
-        # Future: More sophisticated incremental extraction
-        all_messages = old_messages + new_messages
-        return self.extract(all_messages, client)
 
 
 # Example usage

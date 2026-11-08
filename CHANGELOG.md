@@ -1,5 +1,41 @@
 # APRIL TUI Improvements - Changelog
 
+## Version 1.1 - Memory Correctness & Subagent Concurrency
+
+### Overview
+Targets the memory and subagent paths: extraction cost stops growing with history, duplicate knowledge is stored exactly once, and subagent tasks overlap their LLM waits instead of queueing.
+
+### Fixes & Changes
+
+#### Incremental Memory Extraction
+- **core/memory_extractor.py**: `extract_incremental()` now extracts only from new messages, with old messages passed as labeled context (previously it re-sent the entire history on every call, making extraction cost grow quadratically)
+- Skips the LLM call entirely when there is nothing new to extract
+- Shared `_extract_with_prompt()` removes the duplicated extraction logic
+- New `INCREMENTAL_EXTRACTION_PROMPT` alongside the existing `EXTRACTION_PROMPT` (shared instruction block)
+
+#### Memory Deduplication
+- **core/database.py**: `memory` table gains a `content_hash` column with a unique index; `save_memory()` stores identical `(memory_type, content)` once across sessions and returns the existing row's id
+- Automatic migration for existing databases: backfills hashes, collapses pre-existing duplicates (earliest kept), creates the unique index
+- New module-level `memory_hash()` helper (SHA-256, dictionary key-order insensitive)
+
+#### Concurrent Subagent Dispatch
+- **core/subagent.py**: `SubagentManager` now runs tasks on a thread pool
+  - `dispatch_and_wait()` actually enforces its documented `timeout` (raises `TimeoutError`; the task keeps running past it)
+  - New `dispatch_async()` returns a `Future` for the result
+  - New `dispatch_parallel()` dispatches one task per subagent concurrently
+  - New `shutdown(wait=)` closes the pool
+- Per-subagent `_run_lock` serializes concurrent dispatches to the same process
+- `SubagentProcess` accepts an injected runtime (test or alternate runtimes); session metadata wiring is skipped when the runtime has no session
+
+#### Misc
+- **core/config.py**: added missing `AgentConfig.validate()` (tests referenced it; it did not exist)
+- **profile_agent.py**: new stdlib-only cProfile profiler; reports LLM wait share of wall time vs Python-side hot spots, ranked, plus an APRIL-code-only view (`--runs`, `--prompt`)
+- **tests**: new `tests/test_subagent.py` (dispatch, futures, timeout, parallel overlap); new extraction-target, dedup, and legacy-migration tests (55 total)
+
+### Notes
+- `AgentRuntime._extract_and_store_memories()` already drove extraction from the database's `processed` message flags; that live path is unchanged.
+- Entry points (`cli/`, `main.py`, `launcher.py`) are untouched; all changes are backward-compatible in signatures.
+
 ## Version 1.0 - Event Bus & IPC Architecture
 
 ### Overview

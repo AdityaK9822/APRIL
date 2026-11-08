@@ -1,50 +1,38 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "april-os"
+name = "april-agent"
 version = "0.1.0"
-description = "APRIL OS - An assistant with a body"
+description = "APRIL Agent: recursive agent harnessing backend modeled on Harness²"
 readme = "README.md"
-requires-python = ">=3.8"
-license = {text = "MIT"}
-authors = [
-    {name = "Aditya Kadam", email = "aditya@example.com"}
-]
-keywords = ["ai", "agent", "llm", "assistant"]
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.14"
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: POSIX",
 ]
-
-dependencies = [
-    "openai>=1.0.0",
-    "python-dotenv>=1.0.0",
-    "pyyaml>=6.0",
-]
+authors = [{ name = "APRIL Agent" }]
+dependencies = []
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-]
+dev = ["ruff>=0.9", "pytest>=8"]
 
 [project.scripts]
-april = "april_os.cli.main:main"
+april = "main:main"
 
-[tool.pytest.ini_options]
-testpaths = ["april_os/tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = "-v --tb=short"
+[tool.setuptools]
+py-modules = ["main", "launcher", "profile_agent"]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["april_os*"]
+include = ["april*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["third_party", "dependencies"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
